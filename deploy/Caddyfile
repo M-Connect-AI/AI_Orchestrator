@@ -1,0 +1,33 @@
+{
+	email {$ACME_EMAIL:admin@localhost}
+}
+
+{$SITE_ADDRESS:http://:80} {
+	encode gzip
+
+	handle_path /api/agent/* {
+		reverse_proxy agent:3001 {
+			flush_interval -1
+			transport http {
+				read_timeout 5m
+				write_timeout 5m
+			}
+		}
+	}
+
+	handle_path /api/hr/* {
+		reverse_proxy hr:3002 {
+			flush_interval -1
+			transport http {
+				read_timeout 2m
+				write_timeout 2m
+			}
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

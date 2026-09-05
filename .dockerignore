@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+.git
+.gitignore
+.env
+.env.local
+.env.prod
+*.log
+.DS_Store
+coverage
+apps/web/dist
+agent-transcripts
+.codegraph
+**/*.tsbuildinfo

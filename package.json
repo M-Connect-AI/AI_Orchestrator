@@ -1,0 +1,19 @@
+{
+  "name": "msb-hr-copilot",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --filter @msb/shared --filter @msb/policy-docs build && turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "seed": "pnpm --filter @msb/hr-mock-service seed",
+    "prod:up": "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build",
+    "prod:seed": "docker compose -f docker-compose.prod.yml --env-file .env.prod --profile seed run --rm seed",
+    "prod:logs": "docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f --tail=100",
+    "prod:down": "docker compose -f docker-compose.prod.yml --env-file .env.prod down"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3"
+  }
+}

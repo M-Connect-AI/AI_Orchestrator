@@ -1,0 +1,134 @@
+name: msb-hr
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  hr:
+    image: msb-hr-node:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: node
+    working_dir: /app/apps/hr-mock-service
+    command: ["node", "dist/main.js"]
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      HR_PORT: "3002"
+      HR_MONGO_URI: mongodb://mongo:27017/msb_hr
+      MONGO_URI: mongodb://mongo:27017/msb_hr
+      JWT_SECRET: ${JWT_SECRET:?Copy .env.prod.example to .env.prod and set JWT_SECRET}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  agent:
+    image: msb-hr-node:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: node
+    working_dir: /app/apps/agent-service
+    command: ["node", "dist/main.js"]
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      AGENT_PORT: "3001"
+      AGENT_MONGO_URI: mongodb://mongo:27017/msb_hr_agent
+      HR_MOCK_BASE_URL: http://hr:3002
+      JWT_SECRET: ${JWT_SECRET:?Copy .env.prod.example to .env.prod and set JWT_SECRET}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-qwen/qwen3.7-plus}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      hr:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  web:
+    image: msb-hr-web:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        VITE_AGENT_API_URL: /api/agent
+        VITE_HR_API_URL: /api/hr
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-http://:80}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      agent:
+        condition: service_healthy
+      hr:
+        condition: service_healthy
+
+  seed:
+    profiles: ["seed"]
+    image: msb-hr-node:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: node
+    working_dir: /app/apps/hr-mock-service
+    command: ["node", "dist/seed.js"]
+    env_file:
+      - .env.prod
+    environment:
+      HR_MONGO_URI: mongodb://mongo:27017/msb_hr
+      MONGO_URI: mongodb://mongo:27017/msb_hr
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  caddy_data:
+  caddy_config:

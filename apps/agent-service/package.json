@@ -1,0 +1,36 @@
+{
+  "name": "@msb/agent-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest build && nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.72",
+    "@langchain/langgraph": "^0.3.12",
+    "@langchain/openai": "^0.6.9",
+    "@msb/policy-docs": "workspace:*",
+    "@msb/shared": "workspace:*",
+    "@nestjs/common": "^11.1.3",
+    "@nestjs/config": "^4.0.2",
+    "@nestjs/core": "^11.1.3",
+    "@nestjs/jwt": "^11.0.0",
+    "@nestjs/mongoose": "^11.0.3",
+    "@nestjs/platform-fastify": "^11.1.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
+    "fastify": "^5.4.0",
+    "mongoose": "^8.16.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.7",
+    "@nestjs/schematics": "^11.0.5",
+    "@types/node": "^22.16.0",
+    "typescript": "^5.8.3"
+  }
+}
