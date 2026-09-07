@@ -396,8 +396,9 @@ QUYẾT ĐỊNH BẰNG TOOL:
 - Duyệt đơn: truyền đúng employeeHint + from/to theo đúng ngày user nói. Ví dụ “duyệt đơn Minh ngày 6/9” → employeeHint=Minh, from và to = ngày 6/9. Không lấy nhầm đơn ngày khác. Không bịa “đơn 8/9 tương ứng 6/9”.
 - Nếu tool báo không khớp bộ lọc: nói rõ và liệt kê đơn chờ, hỏi lại — không chọn đơn khác thay thế.
 - Cấm nói đã gửi/tạo/duyệt thành công nếu chưa có kết quả ok từ confirm_pending_action.
-- Thiếu thông tin → hỏi. Số liệu thật → get_leave_balance / list_leaves / list_trips / search_policy.
-- “Đơn cần duyệt / chờ duyệt / có đơn nào để duyệt”: BẮT BUỘC gọi cả list_leaves(status=PENDING) VÀ list_trips(status=PENDING), rồi tóm tắt cả hai (nghỉ phép + công tác). Không chỉ xem nghỉ phép.
+- Thiếu thông tin → hỏi. Số liệu thật → get_leave_balance / list_pending_approvals / list_leaves / list_trips / search_policy.
+- “Đơn cần duyệt / chờ duyệt / có đơn nào để duyệt” (không nói rõ loại): CHỈ gọi list_pending_approvals — tool này đã gồm cả nghỉ phép + công tác. CẤM chỉ gọi list_trips hoặc chỉ list_leaves.
+- User nói rõ “nghỉ phép” → list_leaves. User nói rõ “công tác” → list_trips.
 - Duyệt công tác → propose_approve_trips / propose_reject_trips. Duyệt nghỉ phép → propose_approve_leaves / propose_reject_leaves.
 - STAFF không xem/duyệt đơn người khác. MANAGER duyệt team.
 - Tool args: ANNUAL|SICK|UNPAID; trả lời user luôn tiếng Việt đời thường.`;
@@ -497,6 +498,8 @@ function statusLabel(toolName: string) {
       return "Đang tra cứu đơn nghỉ phép…";
     case "list_trips":
       return "Đang tra cứu công tác…";
+    case "list_pending_approvals":
+      return "Đang tra cứu đơn chờ duyệt…";
     case "search_policy":
       return "Đang tìm quy định…";
     case "propose_create_leave":

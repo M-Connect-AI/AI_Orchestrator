@@ -12,9 +12,18 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
   {
     type: "function",
     function: {
+      name: "list_pending_approvals",
+      description:
+        "ƯU TIÊN khi user hỏi chung về đơn cần duyệt / chờ phê duyệt / có đơn nào để duyệt (không nói rõ chỉ nghỉ phép hay chỉ công tác). Trả về CẢ đơn nghỉ phép PENDING và đơn công tác PENDING trong một lần. Không dùng list_leaves/list_trips riêng cho câu hỏi chung này.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "list_leaves",
       description:
-        "Tra cứu / lọc danh sách đơn nghỉ phép. STAFF chỉ thấy đơn của mình. MANAGER thấy team. Dùng khi user muốn xem, liệt kê, thống kê đơn (kể cả đã duyệt / từ chối). Khi hỏi đơn cần duyệt: gọi status=PENDING và đồng thời gọi list_trips(status=PENDING).",
+        "Chỉ khi user nói rõ đơn NGHỈ PHÉP (hoặc loại phép cụ thể). STAFF: của mình; MANAGER: team. Không dùng cho câu hỏi chung “đơn cần duyệt” — dùng list_pending_approvals.",
       parameters: {
         type: "object",
         properties: {
@@ -57,7 +66,7 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
     function: {
       name: "list_trips",
       description:
-        "Tra cứu đơn công tác (STAFF: của mình; MANAGER: team). Khi user hỏi đơn cần duyệt / chờ duyệt: gọi với status=PENDING (và cũng gọi list_leaves status=PENDING vì nghỉ phép là nguồn khác). Có thể lọc employeeHint, from, to.",
+        "Chỉ khi user nói rõ đơn CÔNG TÁC. STAFF: của mình; MANAGER: team. Không dùng cho câu hỏi chung “đơn cần duyệt” — dùng list_pending_approvals.",
       parameters: {
         type: "object",
         properties: {

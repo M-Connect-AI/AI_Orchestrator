@@ -75,6 +75,8 @@ export class ToolRunnerService {
       switch (name) {
         case "get_leave_balance":
           return this.getBalance(ctx);
+        case "list_pending_approvals":
+          return this.listPendingApprovals(ctx);
         case "list_leaves":
           return this.listLeaves(args, ctx);
         case "list_trips":
@@ -251,7 +253,10 @@ export class ToolRunnerService {
       };
     }
     const wasBatch =
-      ctx.pending.tool === "approve_leaves" || ctx.pending.tool === "reject_leaves";
+      ctx.pending.tool === "approve_leaves" ||
+      ctx.pending.tool === "reject_leaves" ||
+      ctx.pending.tool === "approve_trips" ||
+      ctx.pending.tool === "reject_trips";
     return {
       content: JSON.stringify({
         ok: true,
@@ -283,6 +288,56 @@ export class ToolRunnerService {
         summary: `Phép năm còn ${b.annualRemaining}/${b.annualTotal} ngày; phép ốm còn khung ${b.sickRemaining} ngày.`,
       }),
       effects: { preview: b },
+    };
+  }
+
+  /** Luôn lấy cả nghỉ phép + công tác PENDING — tránh model chỉ gọi một loại. */
+  private async listPendingApprovals(ctx: ToolRunContext): Promise<ToolRunResult> {
+    const scope = ctx.actor.role === "STAFF" ? "me" : "team";
+    const [leaves, trips] = await Promise.all([
+      this.tools.listLeaves(ctx.actor, scope),
+      this.tools.listTrips(ctx.actor, scope),
+    ]);
+    const pendingLeaves = (leaves as LeaveRow[]).filter((r) => r.status === "PENDING");
+    const pendingTrips = (trips as TripRow[]).filter((r) => r.status === "PENDING");
+    const leavePart = pendingLeaves.length
+      ? formatLeaveList(pendingLeaves, "nghỉ phép chờ duyệt").stats
+      : "Không có đơn nghỉ phép chờ duyệt.";
+    const tripPart = pendingTrips.length
+      ? formatTripList(pendingTrips, "công tác chờ duyệt").stats
+      : "Không có đơn công tác chờ duyệt.";
+    const leaveIds = pendingLeaves.map((r) => String(r._id ?? r.id));
+    const tripIds = pendingTrips.map((r) => String(r._id ?? r.id));
+    const summary = [
+      `Tổng chờ duyệt: ${pendingLeaves.length} nghỉ phép + ${pendingTrips.length} công tác.`,
+      "",
+      "— Nghỉ phép —",
+      leavePart,
+      "",
+      "— Công tác —",
+      tripPart,
+    ].join("\n");
+    return {
+      content: JSON.stringify({
+        ok: true,
+        scope,
+        leaveCount: pendingLeaves.length,
+        tripCount: pendingTrips.length,
+        leaveIds,
+        tripIds,
+        summary,
+        hint:
+          ctx.actor.role === "MANAGER"
+            ? "Duyệt nghỉ phép → propose_approve_leaves; duyệt công tác → propose_approve_trips."
+            : undefined,
+      }),
+      effects: {
+        preview: { leaves: pendingLeaves, trips: pendingTrips },
+        slots: {
+          ...ctx.slots,
+          listedIds: [...leaveIds, ...tripIds].join(","),
+        },
+      },
     };
   }
 
