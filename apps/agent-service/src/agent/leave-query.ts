@@ -58,16 +58,38 @@ export function looksLikeLeaveApprove(message: string) {
   );
 }
 
+/** Tạo / xin đơn mới — không phải xem danh sách. */
 export function looksLikeLeaveCreate(message: string) {
-  return /(?:tôi|mình|cho tôi)\s+(?:muốn\s+)?(?:xin nghỉ|tạo đơn|đăng ký phép)|xin nghỉ phép|tạo đơn nghỉ/i.test(
+  const t = message.toLowerCase();
+  if (
+    /(?:xem|liệt\s*kê|danh\s*sách|thống\s*kê|có\s+(?:những\s+)?đơn|đơn\s+nào|thông\s*tin\s+đơn)\b/.test(t) &&
+    !/(?:tạo|xin|đăng\s*ký)\b/.test(t)
+  ) {
+    return false;
+  }
+  return /(?:tạo|xin|đăng\s*ký)\s+(?:cho\s+(?:tôi|mình)\s+)?(?:đơn\s+)?(?:nghỉ|phép)|(?:cho\s+(?:tôi|mình)\s+)(?:tạo\s+)?(?:đơn\s+)?nghỉ(?:\s+phép)?|(?:tôi|mình)\s+(?:muốn\s+)?(?:xin\s+)?nghỉ(?:\s+phép)?|xin\s+nghỉ(?:\s+phép)?|tạo\s+đơn\s+nghỉ|nghỉ\s+phép\s+(?:ngày|hôm)|cho\s+(?:tôi|mình)\s+nghỉ(?:\s+phép)?/i.test(
     message,
   );
+}
+
+/** Ngày “hiện tại” theo Asia/Ho_Chi_Minh (tránh lệch UTC trên server). */
+export function nowInVietnam(base = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(base);
+  const y = Number(parts.find((p) => p.type === "year")?.value);
+  const m = Number(parts.find((p) => p.type === "month")?.value);
+  const d = Number(parts.find((p) => p.type === "day")?.value);
+  return new Date(y, m - 1, d);
 }
 
 export function parseLeaveQuery(
   message: string,
   extracted: Partial<LeaveQuery> = {},
-  now = new Date(),
+  now = nowInVietnam(),
 ): LeaveQuery {
   const t = message.toLowerCase();
   const fromThisTurn = Boolean(message.trim());
@@ -190,7 +212,7 @@ export function describeLeaveQuery(q: LeaveQuery): string {
   return parts.join(", ");
 }
 
-export function parseQueryDates(message: string, now = new Date()): { from: string | null; to: string | null } {
+export function parseQueryDates(message: string, now = nowInVietnam()): { from: string | null; to: string | null } {
   const t = message.toLowerCase();
   const y = now.getFullYear();
   if (/tháng trước/.test(t)) {
@@ -238,10 +260,10 @@ export function parseQueryDates(message: string, now = new Date()): { from: stri
 }
 
 function relativeDay(t: string, now: Date): string | null {
-  if (/hôm qua/.test(t)) return iso(addDays(now, -1));
-  if (/ngày kia/.test(t)) return iso(addDays(now, 2));
-  if (/ngày mai/.test(t) && !/tháng mai/.test(t)) return iso(addDays(now, 1));
-  if (/hôm nay|ngày này/.test(t)) return iso(now);
+  if (/hôm\s*qua/.test(t)) return iso(addDays(now, -1));
+  if (/ngày\s*kia/.test(t)) return iso(addDays(now, 2));
+  if (/ngày\s*mai/.test(t) && !/tháng\s*mai/.test(t)) return iso(addDays(now, 1));
+  if (/hôm\s*nay|ngày\s*này|hôm\s*ni/.test(t)) return iso(now);
   return null;
 }
 

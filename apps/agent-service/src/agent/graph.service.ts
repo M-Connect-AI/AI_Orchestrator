@@ -21,6 +21,7 @@ import {
   looksLikeLeaveInfo,
   parseLeaveQuery,
   parseListedIds,
+  parseQueryDates,
   pickByOrdinal,
   queryFromSlots,
 } from "./leave-query";
@@ -194,6 +195,8 @@ export class AgentGraphService {
       }
       if (
         !looksLikeLeaveCreate(s.message) &&
+        extracted.intent !== "leave_create" &&
+        extracted.intent !== "trip_create" &&
         (looksLikeLeaveInfo(s.message) || leaveQueryActive(parseLeaveQuery(s.message)))
       ) {
         return "leave_list";
@@ -204,6 +207,9 @@ export class AgentGraphService {
         /xem|thông tin|danh sách|các đơn|đơn của/.test(s.message)
       ) {
         return "leave_list";
+      }
+      if (looksLikeLeaveCreate(s.message) && resolved !== "trip_create") {
+        return "leave_create";
       }
       return resolved;
     })();
@@ -220,6 +226,15 @@ export class AgentGraphService {
         ordinal: extracted.slots.ordinal,
       });
       slots = { ...applyQueryToSlots(slots, q), listedIds: s.slots.listedIds };
+    } else if (intent === "leave_create" || intent === "trip_create") {
+      const dates = parseQueryDates(s.message);
+      if (dates.from || dates.to) {
+        slots = {
+          ...slots,
+          from: dates.from ?? slots.from,
+          to: dates.to ?? dates.from ?? slots.to,
+        };
+      }
     } else if (s.intent === "leave_approve" || s.intent === "leave_list") {
       slots = applyMessageHints(
         s.message,

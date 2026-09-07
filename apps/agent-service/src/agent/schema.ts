@@ -79,7 +79,6 @@ export function applyMessageHints(message: string, slots: Slots): Slots {
   return { ...slots, leaveType, employeeHint };
 }
 
-/** 11/9, 12/9 → ISO; không năm thì lấy năm hiện tại, đã qua thì +1 năm. */
 export function normalizeVnDate(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
@@ -89,12 +88,20 @@ export function normalizeVnDate(raw: string | null | undefined): string | null {
   const day = Number(m[1]);
   const month = Number(m[2]);
   if (month < 1 || month > 12 || day < 1 || day > 31) return trimmed;
-  let year = m[3] ? Number(m[3]) : new Date().getFullYear();
+  const vnParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const vnYear = Number(vnParts.find((p) => p.type === "year")?.value);
+  const vnMonth = Number(vnParts.find((p) => p.type === "month")?.value);
+  const vnDay = Number(vnParts.find((p) => p.type === "day")?.value);
+  let year = m[3] ? Number(m[3]) : vnYear;
   if (year < 100) year += 2000;
   const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   const start = new Date(`${iso}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = new Date(vnYear, vnMonth - 1, vnDay);
   if (!m[3] && start < today) {
     return `${year + 1}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }

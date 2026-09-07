@@ -35,6 +35,8 @@ Tài khoản demo (mật khẩu `password123`):
 | STAFF | c.le@msb.vn | Team Trần Thị B |
 | MANAGER | b.tran@msb.vn | Duyệt đơn team |
 
+Hoặc dùng tab **Đăng ký** trên màn login để tạo user mới (tự cấp `EMPxxx`).
+
 Gắn GreenNode: điền `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` trong `.env`.
 
 ## Deploy VNG Cloud (vServer)

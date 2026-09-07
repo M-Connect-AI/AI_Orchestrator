@@ -44,7 +44,18 @@ export async function hrFetch<T>(path: string, token: string, init?: RequestInit
       ...(init?.headers ?? {}),
     },
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text || `HR API ${res.status}`;
+    try {
+      const body = JSON.parse(text) as { message?: string | string[] };
+      if (Array.isArray(body.message)) message = body.message.join("\n");
+      else if (typeof body.message === "string" && body.message.trim()) message = body.message;
+    } catch {
+      /* keep text */
+    }
+    throw new Error(message);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -55,6 +66,37 @@ export async function login(email: string, password: string): Promise<Session> {
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) throw new Error("Đăng nhập thất bại");
+  const data = (await res.json()) as Session;
+  saveSession(data);
+  return data;
+}
+
+export type RegisterInput = {
+  email: string;
+  password: string;
+  fullName: string;
+  role?: "STAFF" | "MANAGER";
+  department?: string;
+  managerEmployeeCode?: string;
+};
+
+export async function register(input: RegisterInput): Promise<Session> {
+  const res = await fetch(`${HR_API}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    let message = "Đăng ký thất bại";
+    try {
+      const body = (await res.json()) as { message?: string | string[] };
+      if (Array.isArray(body.message)) message = body.message.join("\n");
+      else if (typeof body.message === "string" && body.message.trim()) message = body.message;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(message);
+  }
   const data = (await res.json()) as Session;
   saveSession(data);
   return data;
