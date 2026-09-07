@@ -42,7 +42,11 @@ export class LeavesService {
         .select("employeeCode")
         .lean()
         .exec();
-      const codes = reports.map((r) => r.employeeCode);
+      // Gồm cả đơn của chính quản lý — tránh trừ phép mà không thấy log trên tab Kết quả.
+      const codes = [
+        actor.employeeCode,
+        ...reports.map((r) => r.employeeCode),
+      ];
       const rows = await this.leaves
         .find({ employeeCode: { $in: codes } })
         .sort({ createdAt: -1 })

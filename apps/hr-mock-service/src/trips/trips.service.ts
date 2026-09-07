@@ -36,18 +36,37 @@ export class TripsService {
         .select("employeeCode")
         .lean()
         .exec();
-      const codes = reports.map((r) => r.employeeCode);
-      return this.trips
+      const codes = [
+        actor.employeeCode,
+        ...reports.map((r) => r.employeeCode),
+      ];
+      const rows = await this.trips
         .find({ employeeCode: { $in: codes } })
         .sort({ createdAt: -1 })
         .lean()
         .exec();
+      return this.withNames(rows);
     }
-    return this.trips
+    const rows = await this.trips
       .find({ employeeCode: actor.employeeCode })
       .sort({ createdAt: -1 })
       .lean()
       .exec();
+    return this.withNames(rows);
+  }
+
+  private async withNames<T extends { employeeCode: string }>(rows: T[]) {
+    const codes = [...new Set(rows.map((r) => r.employeeCode))];
+    const people = await this.employees
+      .find({ employeeCode: { $in: codes } })
+      .select("employeeCode fullName")
+      .lean()
+      .exec();
+    const names = new Map(people.map((p) => [p.employeeCode, p.fullName]));
+    return rows.map((r) => ({
+      ...r,
+      employeeName: names.get(r.employeeCode) ?? r.employeeCode,
+    }));
   }
 
   async create(actor: EmployeePublic, dto: CreateTripDto) {

@@ -7,8 +7,10 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "seed": "pnpm --filter @msb/hr-mock-service seed",
+    "policy:ingest": "pnpm --filter @msb/policy-docs build && pnpm --filter @msb/agent-service policy:ingest",
     "prod:up": "docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build",
     "prod:seed": "docker compose -f docker-compose.prod.yml --env-file .env.prod --profile seed run --rm seed",
+    "prod:policy-ingest": "docker compose -f docker-compose.prod.yml --env-file .env.prod --profile policy-ingest run --rm policy-ingest",
     "prod:logs": "docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f --tail=100",
     "prod:down": "docker compose -f docker-compose.prod.yml --env-file .env.prod down"
   },

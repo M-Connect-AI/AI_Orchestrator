@@ -35,7 +35,7 @@ function greeting(isManager: boolean): Bubble {
   return {
     role: "assistant",
     content: isManager
-      ? "Xin chào quản lý. Mình hỗ trợ xin phép/công tác, xem đơn team và phê duyệt đơn nghỉ phép đang chờ. Bạn muốn làm gì?"
+      ? "Xin chào quản lý. Mình hỗ trợ xin phép/công tác, xem đơn team và phê duyệt nghỉ phép hoặc công tác đang chờ. Bạn muốn làm gì?"
       : "Xin chào. Mình hỗ trợ xin nghỉ phép, xin công tác, xem đơn của bạn và giải thích quy định nội bộ. Bạn muốn làm gì?",
   };
 }
@@ -176,7 +176,7 @@ export function ChatPage() {
       rememberThread(result.threadId);
       patchLastAssistant({
         content: result.reply || undefined,
-        confirm: result.confirm,
+        confirm: result.confirm || undefined,
         thinking: false,
       });
       setThreads((prev) => {
@@ -191,9 +191,9 @@ export function ChatPage() {
         return [{ ...item, title: existing?.title || item.title }, ...rest];
       });
       void refreshList();
-      if (result.executed) {
-        void queryClient.invalidateQueries();
-      }
+      void queryClient.invalidateQueries({ queryKey: ["leaves"] });
+      void queryClient.invalidateQueries({ queryKey: ["trips"] });
+      void queryClient.invalidateQueries({ queryKey: ["balance"] });
     } catch (e) {
       patchLastAssistant({
         thinking: false,
@@ -294,8 +294,11 @@ export function ChatPage() {
                       {m.confirm ? (
                         <div className="mt-3 pt-3 border-t border-msb-mist">
                           <p className="text-xs text-stone-500 mb-2">
-                            {m.confirm.tool === "approve_leaves"
-                              ? "Chỉ phê duyệt các đơn đã thống kê ở trên"
+                            {m.confirm.tool === "approve_leaves" ||
+                            m.confirm.tool === "reject_leaves" ||
+                            m.confirm.tool === "approve_trips" ||
+                            m.confirm.tool === "reject_trips"
+                              ? "Chỉ áp dụng các đơn đã thống kê ở trên"
                               : "Thao tác ghi — cần xác nhận trước khi gửi hệ thống"}
                           </p>
                           <button
@@ -304,9 +307,11 @@ export function ChatPage() {
                             className="bg-msb-orange hover:bg-msb-orange-dark text-white text-xs px-3 py-1.5 rounded-lg"
                             onClick={() => void run("đồng ý", true)}
                           >
-                            {m.confirm.tool === "approve_leaves"
+                            {m.confirm.tool === "approve_leaves" || m.confirm.tool === "approve_trips"
                               ? `Xác nhận phê duyệt ${Array.isArray(m.confirm.args.ids) ? m.confirm.args.ids.length : ""} đơn`
-                              : "Xác nhận gửi"}
+                              : m.confirm.tool === "reject_leaves" || m.confirm.tool === "reject_trips"
+                                ? `Xác nhận từ chối ${Array.isArray(m.confirm.args.ids) ? m.confirm.args.ids.length : ""} đơn`
+                                : "Xác nhận gửi"}
                           </button>
                         </div>
                       ) : null}

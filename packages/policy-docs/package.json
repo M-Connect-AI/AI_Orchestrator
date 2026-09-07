@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp leave-policy.md dist/leave-policy.md"
+    "build": "tsc -p tsconfig.json && rm -rf dist/policies && cp -R policies dist/policies"
   },
   "dependencies": {
     "@msb/shared": "workspace:*"

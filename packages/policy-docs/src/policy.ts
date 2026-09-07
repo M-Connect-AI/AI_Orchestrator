@@ -1,4 +1,4 @@
-/** Số liệu quy định — nguồn duy nhất cho chặn đơn và RAG. */
+/** Số liệu quy định — nguồn duy nhất cho validate đơn (HRIS/agent). RAG lấy thêm từ policies/*.md qua Qdrant. */
 export const POLICY = {
   leave: {
     annual: {

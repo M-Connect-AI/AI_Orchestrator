@@ -30,13 +30,27 @@ const leaveSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const tripSchema = new mongoose.Schema(
+  {
+    employeeCode: String,
+    destination: String,
+    from: String,
+    to: String,
+    purpose: String,
+    status: String,
+  },
+  { timestamps: true },
+);
+
 async function main() {
   await mongoose.connect(uri);
   const Employee = mongoose.model("Employee", employeeSchema);
   const Leave = mongoose.model("Leave", leaveSchema);
+  const Trip = mongoose.model("Trip", tripSchema);
   const hash = await bcrypt.hash("password123", 10);
   await Employee.deleteMany({});
   await Leave.deleteMany({});
+  await Trip.deleteMany({});
   await Employee.insertMany([
     {
       employeeCode: "EMP001",
@@ -103,11 +117,29 @@ async function main() {
       status: "PENDING",
     },
   ]);
+  await Trip.insertMany([
+    {
+      employeeCode: "EMP001",
+      destination: "Hà Nội",
+      from: "2026-09-12",
+      to: "2026-09-13",
+      purpose: "Họp khách hàng ưu tiên",
+      status: "PENDING",
+    },
+    {
+      employeeCode: "EMP003",
+      destination: "Đà Nẵng",
+      from: "2026-09-20",
+      to: "2026-09-22",
+      purpose: "Đào tạo chi nhánh miền Trung",
+      status: "PENDING",
+    },
+  ]);
   console.log("Seeded 2 STAFF + 1 MANAGER. Password: password123");
   console.log("  STAFF    a.nguyen@msb.vn  (team Trần Thị B)");
   console.log("  MANAGER  b.tran@msb.vn");
   console.log("  STAFF    c.le@msb.vn      (team Trần Thị B)");
-  console.log("  3 đơn PENDING để demo phê duyệt.");
+  console.log("  3 đơn nghỉ PENDING + 2 đơn công tác PENDING để demo phê duyệt.");
   await mongoose.disconnect();
 }
 

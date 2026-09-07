@@ -5,27 +5,39 @@ Hệ thống AI Agent thực thi nghiệp vụ nhân sự nội bộ (nghỉ ph�
 ## Kiến trúc
 
 - `apps/web` — React, chat + tab kết quả
-- `apps/agent-service` — NestJS + LangGraph, guardrails, HITL
-- `apps/hr-mock-service` — NestJS + MongoDB, CRUD giả lập HR
-- `packages/policy-docs` — quy định nghỉ phép / công tác (markdown + số liệu + validate)
-- MongoDB cho HR data và conversation checkpoint
+- `apps/agent-service` — NestJS tool-calling agent, guardrails, HITL, policy RAG (Qdrant)
+- `apps/hr-mock-service` — NestJS + MongoDB, CRUD giả lập HR (+ validate đơn)
+- `packages/policy-docs` — file quy định (`policies/*.md`) + số liệu / validate helpers
+- MongoDB — HR data + conversation checkpoint
+- **Qdrant** — vector DB cho tra cứu policy (semantic RAG)
 
-LLM: GreenNode MaaS (OpenAI-compatible), bắt buộc `LLM_API_KEY` trong `.env`.
+LLM + chat: GreenNode MaaS (OpenAI-compatible). Bắt buộc `LLM_API_KEY` trong `.env`.
+Embedding (RAG): model local `Xenova/multilingual-e5-small` (GreenNode hiện chỉ có chat model).
+
+### Policy RAG
+
+1. Thêm/sửa file trong `packages/policy-docs/policies/*.md`
+2. Chạy `pnpm policy:ingest` (embed local + ghi Qdrant; **không** có job định kỳ)
+3. Agent gọi tool `search_policy` → query Qdrant → cite nguồn
+
+Validate tạo đơn vẫn ở HRIS / rules — tách khỏi RAG.
 
 ## Chạy local
 
 ```bash
-docker compose up -d
-cp .env.example .env
+docker compose up -d          # mongo + qdrant
+cp .env.example .env          # điền LLM_API_KEY
 pnpm install
 pnpm --filter @msb/shared --filter @msb/policy-docs build
 pnpm --filter @msb/hr-mock-service seed
+pnpm policy:ingest            # index policy vào Qdrant (cần API key)
 pnpm dev
 ```
 
 - UI: http://localhost:5173
 - Agent: http://localhost:3001
 - HR Mock: http://localhost:3002
+- Qdrant: http://localhost:6333/dashboard
 
 Tài khoản demo (mật khẩu `password123`):
 
@@ -37,7 +49,7 @@ Tài khoản demo (mật khẩu `password123`):
 
 Hoặc dùng tab **Đăng ký** trên màn login để tạo user mới (tự cấp `EMPxxx`).
 
-Gắn GreenNode: điền `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` trong `.env`.
+Gắn GreenNode: điền `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` trong `.env`. Embedding RAG dùng model local (xem `EMBEDDING_MODEL`).
 
 ## Deploy VNG Cloud (vServer)
 
@@ -63,8 +75,11 @@ nano .env.prod
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 docker compose -f docker-compose.prod.yml --env-file .env.prod --profile seed run --rm seed
+pnpm prod:policy-ingest   # hoặc: docker compose ... --profile policy-ingest run --rm policy-ingest
 ```
 
 5. Mở `http://<IP-public>`. Demo: `b.tran@msb.vn` / `password123`.
 
 **Domain + HTTPS:** trỏ A record về IP VM, sửa `SITE_ADDRESS=copilot.example.com` và `ACME_EMAIL`, rồi `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d web`.
+
+**Đổi policy:** sửa `packages/policy-docs/policies/*.md`, rebuild image (hoặc mount), rồi `pnpm prod:policy-ingest`.

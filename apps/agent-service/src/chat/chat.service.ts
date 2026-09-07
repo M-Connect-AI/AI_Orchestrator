@@ -1,7 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Actor } from "../auth/jwt-auth.guard";
-import { AgentGraphService } from "../agent/graph.service";
-import { ComposeService } from "../agent/compose.service";
+import { ToolAgentService } from "../agent/tool-agent.service";
 import { ThreadService } from "./thread.service";
 import { ChatConfirmAction } from "@msb/shared";
 
@@ -20,9 +19,8 @@ export class ChatService {
   private readonly log = new Logger(ChatService.name);
 
   constructor(
-    private readonly graph: AgentGraphService,
+    private readonly agent: ToolAgentService,
     private readonly threads: ThreadService,
-    private readonly compose: ComposeService,
   ) {}
 
   async turn(
@@ -34,28 +32,20 @@ export class ChatService {
     const thread = await this.threads.load(actor.employeeCode, threadId);
     const history = thread.messages.map((m) => `${m.role}: ${m.content}`);
     const pending = thread.pendingAction;
-    const state = await this.graph.invoke({
+    const state = await this.agent.turn({
       message,
       actor,
       slots: thread.slots,
       intent: thread.intent,
       pending,
       history,
+      onProgress,
     });
-    const reply = await this.compose.phrase({
-      draft: state.reply,
-      userMessage: message,
-      history,
-      intent: state.intent,
-      hasConfirm: Boolean(state.confirm),
-      citations: state.citations ?? [],
-      onToken: onProgress
-        ? (text) => onProgress("token", { text })
-        : undefined,
-    });
-    if (reply !== state.reply) this.log.debug("Compose đã diễn đạt lại câu trả lời");
+    this.log.debug(
+      `Agent turn intent=${state.intent || "-"} confirm=${Boolean(state.confirm)} toolsExecuted=${Boolean(state.executed)}`,
+    );
     thread.messages.push({ role: "user", content: message });
-    thread.messages.push({ role: "assistant", content: reply });
+    thread.messages.push({ role: "assistant", content: state.reply });
     await this.threads.save(thread, {
       slots: state.slots ?? thread.slots,
       intent: state.intent ?? thread.intent,
@@ -64,7 +54,7 @@ export class ChatService {
     });
     return {
       threadId: thread.threadId,
-      reply,
+      reply: state.reply,
       confirm: state.confirm ?? null,
       executed: state.executed ?? null,
       citations: state.citations ?? [],

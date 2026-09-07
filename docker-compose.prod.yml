@@ -64,11 +64,16 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-qwen/qwen3.7-plus}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Xenova/multilingual-e5-small}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_POLICY_COLLECTION: ${QDRANT_POLICY_COLLECTION:-policy_chunks}
     depends_on:
       mongo:
         condition: service_healthy
       hr:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -81,6 +86,12 @@ services:
       timeout: 5s
       retries: 8
       start_period: 20s
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
 
   web:
     image: msb-hr-web:local
@@ -128,7 +139,26 @@ services:
       mongo:
         condition: service_healthy
 
+  policy-ingest:
+    profiles: ["policy-ingest"]
+    image: msb-hr-node:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: node
+    working_dir: /app/apps/agent-service
+    command: ["node", "dist/policy/policy-ingest.js"]
+    env_file:
+      - .env.prod
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Xenova/multilingual-e5-small}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_POLICY_COLLECTION: ${QDRANT_POLICY_COLLECTION:-policy_chunks}
+    depends_on:
+      - qdrant
+
 volumes:
   mongo_data:
+  qdrant_data:
   caddy_data:
   caddy_config:

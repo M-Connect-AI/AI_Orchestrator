@@ -3,8 +3,9 @@ export { validateLeave, validateTrip } from "./rules.js";
 export type { PolicyVerdict } from "./rules.js";
 export {
   formatPolicyChunks,
-  leavePolicyMarkdown,
+  listPolicyFiles,
+  policiesDir,
   policyChunks,
-  retrievePolicy,
+  qdrantPointId,
 } from "./document.js";
 export type { PolicyChunk } from "./document.js";

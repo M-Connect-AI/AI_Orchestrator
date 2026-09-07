@@ -17,6 +17,7 @@ type LeaveRow = {
 type TripRow = {
   _id: string;
   employeeCode: string;
+  employeeName?: string;
   destination: string;
   from: string;
   to: string;
@@ -68,7 +69,9 @@ export function ResultsPage() {
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold text-msb-ink">Nghỉ phép ({scope})</h2>
+        <h2 className="text-lg font-semibold text-msb-ink">
+          Nghỉ phép ({scope === "team" ? "team + của bạn" : scope})
+        </h2>
         <Table
           headers={["Nhân viên", "Mã NV", "Loại", "Từ", "Đến", "Ngày", "Lý do", "Trạng thái"]}
           rows={(leaves.data ?? []).map((r) => [
@@ -85,10 +88,13 @@ export function ResultsPage() {
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold text-msb-ink">Công tác ({scope})</h2>
+        <h2 className="text-lg font-semibold text-msb-ink">
+          Công tác ({scope === "team" ? "team + của bạn" : scope})
+        </h2>
         <Table
-          headers={["Mã NV", "Địa điểm", "Từ", "Đến", "Mục đích", "Trạng thái"]}
+          headers={["Nhân viên", "Mã NV", "Địa điểm", "Từ", "Đến", "Mục đích", "Trạng thái"]}
           rows={(trips.data ?? []).map((r) => [
+            r.employeeName ?? r.employeeCode,
             r.employeeCode,
             r.destination,
             r.from,
