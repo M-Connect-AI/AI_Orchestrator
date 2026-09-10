@@ -27,6 +27,11 @@ import {
   pickByOrdinal,
 } from "./leave-query";
 import { emptySlots, normalizeVnDate, Slots } from "./schema";
+import {
+  CreateJiraTaskInput,
+  JiraTaskFilter,
+  JiraToolsService,
+} from "../jira/jira-tools.service";
 
 export type ToolRunContext = {
   actor: Actor;
@@ -59,6 +64,7 @@ export class ToolRunnerService {
   constructor(
     private readonly tools: HrToolsService,
     private readonly rag: PolicyRagService,
+    private readonly jira: JiraToolsService,
   ) {}
 
   async run(name: string, rawArgs: string, ctx: ToolRunContext): Promise<ToolRunResult> {
@@ -83,6 +89,14 @@ export class ToolRunnerService {
           return this.listTrips(args, ctx);
         case "search_policy":
           return await this.searchPolicy(args);
+        case "jira_my_work_summary":
+          return await this.jiraMyWorkSummary(args, ctx);
+        case "jira_list_my_tasks":
+          return await this.jiraListMyTasks(args, ctx);
+        case "jira_analyze_backlog":
+          return await this.jiraAnalyzeBacklog(args, ctx);
+        case "propose_create_jira_task":
+          return this.proposeCreateJiraTask(args);
         case "propose_create_leave":
           return this.proposeCreateLeave(args, ctx);
         case "propose_create_trip":
@@ -111,11 +125,49 @@ export class ToolRunnerService {
       }
     } catch (e) {
       this.log.warn(`Tool ${name} failed: ${String(e)}`);
-      return {
-        content: JSON.stringify({ ok: false, error: explainHrError(e) }),
-        effects: {},
-      };
+      const error = name.includes("jira")
+        ? explainJiraError(e)
+        : explainHrError(e);
+      return { content: JSON.stringify({ ok: false, error, summary: error }), effects: {} };
     }
+  }
+
+  private async jiraMyWorkSummary(
+    args: Record<string, unknown>,
+    ctx: ToolRunContext,
+  ): Promise<ToolRunResult> {
+    const result = await this.jira.myWorkSummary(ctx.actor, jiraFilter(args));
+    return {
+      content: JSON.stringify({ ok: true, ...result, issues: result.issues.slice(0, 50) }),
+      effects: { preview: result.issues, citations: result.citations },
+    };
+  }
+
+  private async jiraListMyTasks(
+    args: Record<string, unknown>,
+    ctx: ToolRunContext,
+  ): Promise<ToolRunResult> {
+    const result = await this.jira.listMyTasks(ctx.actor, jiraFilter(args));
+    return {
+      content: JSON.stringify({ ok: true, ...result, issues: result.issues.slice(0, 50) }),
+      effects: { preview: result.issues, citations: result.citations },
+    };
+  }
+
+  private async jiraAnalyzeBacklog(
+    args: Record<string, unknown>,
+    ctx: ToolRunContext,
+  ): Promise<ToolRunResult> {
+    const scope = String(args.scope ?? "ME").toUpperCase();
+    const result = await this.jira.analyzeBacklog(ctx.actor, {
+      ...jiraFilter(args),
+      scope: scope === "PROJECT" ? "PROJECT" : "ME",
+      staleDays: numericArg(args.staleDays),
+    });
+    return {
+      content: JSON.stringify({ ok: true, ...result, issues: result.issues.slice(0, 50) }),
+      effects: { preview: result.issues, citations: result.citations },
+    };
   }
 
   async executePending(
@@ -129,6 +181,17 @@ export class ToolRunnerService {
           actor,
           action.args as { type: string; from: string; to: string; reason: string },
         );
+      } else if (action.tool === "create_jira_task") {
+        executed = await this.jira.createTask(
+          actor,
+          action.args as unknown as CreateJiraTaskInput,
+        );
+        const created = executed as { key: string; summary: string; url: string };
+        return {
+          reply: `Đã tạo Jira ${created.key}: ${created.summary}.`,
+          executed,
+          slots: emptySlots(),
+        };
       } else if (action.tool === "create_trip") {
         executed = await this.tools.createTrip(
           actor,
@@ -207,7 +270,8 @@ export class ToolRunnerService {
         slots: emptySlots(),
       };
     } catch (e) {
-      return { reply: explainHrError(e), executed: null, slots: emptySlots() };
+      const error = action.tool === "create_jira_task" ? explainJiraError(e) : explainHrError(e);
+      return { reply: error, executed: null, slots: emptySlots() };
     }
   }
 
@@ -574,6 +638,103 @@ export class ToolRunnerService {
           reason,
         },
       },
+    };
+  }
+
+  private proposeCreateJiraTask(args: Record<string, unknown>): ToolRunResult {
+    const projectKey = String(args.projectKey ?? "").trim().toUpperCase();
+    const summary = String(args.summary ?? "").trim();
+    const description = String(args.description ?? "").trim();
+    const issueType = String(args.issueType ?? "Task") as CreateJiraTaskInput["issueType"];
+    const priority = args.priority
+      ? (String(args.priority) as CreateJiraTaskInput["priority"])
+      : undefined;
+    const dueDate = args.dueDate ? String(args.dueDate).trim() : undefined;
+    const labels = Array.isArray(args.labels)
+      ? args.labels.map(String).map((value) => value.trim()).filter(Boolean)
+      : [];
+
+    if (!/^[A-Z][A-Z0-9_-]{0,31}$/.test(projectKey)) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Thiếu hoặc sai projectKey Jira. Hãy hỏi user mã project, ví dụ SCRUM.",
+        }),
+        effects: {},
+      };
+    }
+    if (summary.length < 3 || summary.length > 255) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Tiêu đề Jira task phải từ 3 đến 255 ký tự.",
+        }),
+        effects: {},
+      };
+    }
+    if (!["Task", "Story", "Bug", "Epic"].includes(issueType ?? "")) {
+      return {
+        content: JSON.stringify({ ok: false, error: "issueType Jira không hợp lệ." }),
+        effects: {},
+      };
+    }
+    if (
+      priority &&
+      !["Highest", "High", "Medium", "Low", "Lowest"].includes(priority)
+    ) {
+      return {
+        content: JSON.stringify({ ok: false, error: "priority Jira không hợp lệ." }),
+        effects: {},
+      };
+    }
+    if (
+      dueDate &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate) ||
+        Number.isNaN(Date.parse(`${dueDate}T00:00:00Z`)))
+    ) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Due date Jira phải theo định dạng YYYY-MM-DD.",
+        }),
+        effects: {},
+      };
+    }
+
+    const task: CreateJiraTaskInput = {
+      projectKey,
+      summary,
+      issueType,
+      ...(description ? { description } : {}),
+      ...(priority ? { priority } : {}),
+      ...(dueDate ? { dueDate } : {}),
+      ...(labels.length ? { labels } : {}),
+      ...(typeof args.assignToSprint === "boolean"
+        ? { assignToSprint: args.assignToSprint }
+        : {}),
+    };
+    const details = [
+      `${issueType} ${projectKey}: ${summary}`,
+      priority ? `priority ${priority}` : null,
+      dueDate ? `due date ${dueDate}` : null,
+      "gán cho tài khoản Jira khớp email đăng nhập",
+    ].filter(Boolean);
+    const action: ChatConfirmAction = {
+      tool: "create_jira_task",
+      args: task as unknown as Record<string, unknown>,
+      summary: `Tạo Jira ${details.join(", ")}`,
+    };
+    return {
+      content: JSON.stringify({
+        ok: true,
+        needsConfirm: true,
+        summary: action.summary,
+        askUser: `${action.summary}. Bạn xác nhận để mình tạo task nhé?`,
+      }),
+      effects: { confirm: action, pending: action },
     };
   }
 
@@ -1030,6 +1191,60 @@ function argsToQuery(args: Record<string, unknown>): LeaveQuery {
     daysHint: args.daysHint != null ? String(args.daysHint) : null,
     ordinal: args.ordinal != null ? String(args.ordinal) : null,
   };
+}
+
+function jiraFilter(args: Record<string, unknown>): JiraTaskFilter {
+  const status = String(args.statusGroup ?? "ALL").toUpperCase();
+  const sprint = String(args.sprint ?? "ALL").toUpperCase();
+  return {
+    projectKey: textArg(args.projectKey),
+    statusGroup: ["TODO", "IN_PROGRESS", "DONE", "NOT_DONE", "ALL"].includes(status)
+      ? (status as JiraTaskFilter["statusGroup"])
+      : "ALL",
+    sprint: ["ACTIVE", "BACKLOG", "ALL"].includes(sprint)
+      ? (sprint as JiraTaskFilter["sprint"])
+      : "ALL",
+    dueBefore: textArg(args.dueBefore),
+    updatedSince: textArg(args.updatedSince),
+    maxResults: numericArg(args.maxResults),
+  };
+}
+
+function textArg(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+function numericArg(value: unknown) {
+  if (value == null || value === "") return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function explainJiraError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/permission group search_jira|bật Jira search/i.test(message)) {
+    return (
+      "API token đã xác thực, nhưng Jira MCP chưa cấp quyền tìm kiếm Jira. " +
+      "Nhờ Org Admin vào Rovo MCP server > Permissions > Search > Edit details và bật Jira search."
+    );
+  }
+  if (/organization.*(api token|token)|chưa cấp quyền Jira MCP qua API token/i.test(message)) {
+    return (
+      "Jira MCP đã kết nối, nhưng Atlassian organization đang chặn truy cập bằng API token. " +
+      "Nhờ Org Admin cấp quyền API token cho Jira MCP hoặc dùng phương thức xác thực đã được tổ chức phê duyệt."
+    );
+  }
+  if (/401|unauthorized|credential|api key|api token/i.test(message)) {
+    return "Không xác thực được Jira MCP. Kiểm tra auth type, email/token hoặc service account API key.";
+  }
+  if (/403|forbidden|scope|permission/i.test(message)) {
+    return "Jira từ chối quyền truy cập. Kiểm tra permission group và scope read/search Jira của credential MCP.";
+  }
+  if (/chưa được cấu hình|cần projectKey|không hợp lệ|chỉ quản lý/i.test(message)) {
+    return message;
+  }
+  return `Không truy vấn được Jira MCP: ${message}`;
 }
 
 function leaveTypeLabel(type: string) {

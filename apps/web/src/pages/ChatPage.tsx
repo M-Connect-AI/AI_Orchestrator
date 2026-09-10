@@ -21,6 +21,8 @@ const STAFF_HINTS = [
   "Tôi muốn xin nghỉ phép năm từ 2026-09-08 đến 2026-09-10 vì đám cưới em",
   "Xem đơn nghỉ phép của tôi",
   "Tôi còn bao nhiêu ngày phép?",
+  "Thống kê task Jira tôi cần làm, đang làm và đã làm",
+  "Phân tích backlog Jira của tôi",
 ];
 
 const MANAGER_HINTS = [
@@ -29,14 +31,15 @@ const MANAGER_HINTS = [
   "Các đơn xin nghỉ ngày 28/8",
   "Chỉ duyệt đơn phép ốm của A",
   "Duyệt đơn thứ 2",
+  "Phân tích backlog project MCONNECT",
 ];
 
 function greeting(isManager: boolean): Bubble {
   return {
     role: "assistant",
     content: isManager
-      ? "Xin chào quản lý. Mình hỗ trợ xin phép/công tác, xem đơn team và phê duyệt nghỉ phép hoặc công tác đang chờ. Bạn muốn làm gì?"
-      : "Xin chào. Mình hỗ trợ xin nghỉ phép, xin công tác, xem đơn của bạn và giải thích quy định nội bộ. Bạn muốn làm gì?",
+      ? "Xin chào quản lý. Mình hỗ trợ nghiệp vụ nhân sự, thống kê task Jira và phân tích backlog project. Bạn muốn làm gì?"
+      : "Xin chào. Mình hỗ trợ nghiệp vụ nhân sự, thống kê task Jira và phân tích backlog của bạn. Bạn muốn làm gì?",
   };
 }
 
@@ -311,6 +314,8 @@ export function ChatPage() {
                               ? `Xác nhận phê duyệt ${Array.isArray(m.confirm.args.ids) ? m.confirm.args.ids.length : ""} đơn`
                               : m.confirm.tool === "reject_leaves" || m.confirm.tool === "reject_trips"
                                 ? `Xác nhận từ chối ${Array.isArray(m.confirm.args.ids) ? m.confirm.args.ids.length : ""} đơn`
+                                : m.confirm.tool === "create_jira_task"
+                                  ? "Xác nhận tạo Jira task"
                                 : "Xác nhận gửi"}
                           </button>
                         </div>

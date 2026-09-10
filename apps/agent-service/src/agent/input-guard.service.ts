@@ -33,7 +33,7 @@ export class InputGuardService {
         return {
           ok: false,
           reason:
-            "Yêu cầu nằm ngoài phạm vi trợ lý nhân sự hoặc có dấu hiệu cố vượt quyền. Tôi chỉ hỗ trợ nghỉ phép / công tác của bạn.",
+            "Yêu cầu nằm ngoài phạm vi hỗ trợ hoặc có dấu hiệu cố vượt quyền. Mình chỉ hỗ trợ nghiệp vụ nhân sự và công việc Jira được cấp quyền.",
         };
       }
     }

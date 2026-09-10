@@ -34,6 +34,7 @@ BẮT BUỘC — định dạng text thuần:
 - Nếu nháp nói ĐÃ tạo/gửi/duyệt thành công: giữ đúng ý đó, nhắc xem tab Kết quả. KHÔNG đổi thành "đang xử lý / sẽ thông báo sau".
 - Nếu nháp đang MỜI xác nhận: kết thúc bằng lời mời xác nhận, chưa nói đã gửi/đã duyệt.
 - Nếu nháp là lỗi / thiếu thông tin: giữ đúng, không bịa đã thành công.
+- CẤM thêm mã task, tiêu đề, trạng thái, priority, due date hoặc số liệu không xuất hiện trong nháp.
 - CẤM nói đã duyệt/đã gửi nếu nháp chỉ là danh sách đơn hoặc đề xuất chờ xác nhận.
 - CẤM đổi ngày/loại phép/tên người so với nháp (ví dụ nháp là 06/09 phép ốm thì không viết thành 08/09 phép năm).
 
@@ -76,6 +77,33 @@ export class ToolAgentService {
         onProgress,
       );
       return done(reply, { slots, pending, confirm: null });
+    }
+
+    const jiraRoute = directJiraRoute(message);
+    if (jiraRoute) {
+      onProgress?.("status", { label: statusLabel(jiraRoute.name) });
+      const run = await this.runner.run(
+        jiraRoute.name,
+        JSON.stringify(jiraRoute.args),
+        { actor, slots, pending },
+      );
+      const payload = readToolPayload(run.content);
+      const draft =
+        payload.summary ||
+        payload.error ||
+        "Không lấy được dữ liệu Jira phù hợp với yêu cầu.";
+      const reply = await this.phraseStream(draft, message, onProgress, {
+        forbidFakeSuccess: true,
+      });
+      return {
+        reply,
+        confirm: null,
+        pending,
+        executed: run.effects.preview ?? null,
+        citations: run.effects.citations ?? [],
+        slots: run.effects.slots ?? slots,
+        intent: input.intent ?? "",
+      };
     }
 
     // Có pending: để MODEL quyết đồng ý/hủy qua tool (không regex "oke").
@@ -379,10 +407,10 @@ function buildSystemPrompt(actor: Actor) {
   const monthEnd = iso(new Date(today.getFullYear(), today.getMonth() + 1, 0));
 
   return `Bạn là M-Mate — trợ lý AI dành cho CBNV MSB, chỉ có trên M-Connect.
-Bạn hỗ trợ thực thi nghiệp vụ (nghỉ phép, công tác, tra cứu/phê duyệt, quy định).
+Bạn hỗ trợ nghiệp vụ nhân sự và công việc Jira (nghỉ phép, công tác, tra cứu/phê duyệt, quy định, task và backlog).
 
 Giọng: xưng "mình", gọi "bạn". Text thuần, không markdown, không enum với user.
-Người dùng: ${actor.employeeCode}, vai trò ${actor.role === "MANAGER" ? "quản lý" : "nhân viên"}.
+Người dùng: ${actor.employeeCode}, email ${actor.email}, vai trò ${actor.role === "MANAGER" ? "quản lý" : "nhân viên"}.
 
 NGÀY (Asia/Ho_Chi_Minh): hôm nay ${hômNay}.
 - hôm nay=${hômNay}; hôm qua=${hômQua}; ngày mai=${ngàyMai}; ngày kia=${ngàyKia}
@@ -401,7 +429,45 @@ QUYẾT ĐỊNH BẰNG TOOL:
 - User nói rõ “nghỉ phép” → list_leaves. User nói rõ “công tác” → list_trips.
 - Duyệt công tác → propose_approve_trips / propose_reject_trips. Duyệt nghỉ phép → propose_approve_leaves / propose_reject_leaves.
 - STAFF không xem/duyệt đơn người khác. MANAGER duyệt team.
+- Jira: câu hỏi tổng quan task của tôi → jira_my_work_summary; cần danh sách theo trạng thái → jira_list_my_tasks; phân tích backlog/rủi ro/ưu tiên → jira_analyze_backlog.
+- Tạo Jira task mới → propose_create_jira_task khi đã có projectKey và summary; thiếu trường nào thì hỏi trường đó. Sau khi propose phải chờ user xác nhận, không confirm trong cùng lượt. Task được gán theo email tài khoản M-Connect.
+- RULE ASSIGNEE JIRA: user vai trò STAFF chỉ được assign task cho chính mình, tức email ${actor.email}. Nếu STAFF yêu cầu assign cho email/tên người khác: KHÔNG gọi propose_create_jira_task, KHÔNG tự đổi assignee, KHÔNG tạo pending action. Trả lời chính xác: “Theo rule phân quyền, nhân viên chỉ được tạo Jira task và assign cho chính mình. Bạn không thể assign task cho người khác.”
+- Không được nói lỗi kết nối, thiếu quyền Jira MCP hoặc thiếu thông tin khi nguyên nhân thực tế là vi phạm rule assignee trên.
+- Với mọi câu hỏi Jira, kể cả câu hỏi tiếp nối như “mô tả 2 task”, “task nào”, “board nào”: bắt buộc dùng dữ liệu tool mới nhất. Cấm tự suy diễn hoặc tạo mã task, tiêu đề, trạng thái, priority, due date không có trong kết quả tool.
+- "đã làm" → statusGroup=DONE; "đang làm" → IN_PROGRESS; "cần làm" → TODO; "chưa làm/chưa xong" → NOT_DONE.
+- Jira của CBNV luôn được scope theo email tài khoản M-Connect. Không tự tạo JQL và không hỏi credential trong chat.
+- Chỉ MANAGER được dùng jira_analyze_backlog scope=PROJECT và phải có projectKey. Jira chỉ hỗ trợ đọc và tạo task có xác nhận; chưa hỗ trợ sửa/xóa/chuyển trạng thái.
 - Tool args: ANNUAL|SICK|UNPAID; trả lời user luôn tiếng Việt đời thường.`;
+}
+
+function directJiraRoute(message: string): {
+  name: "jira_my_work_summary" | "jira_list_my_tasks" | "jira_analyze_backlog";
+  args: Record<string, unknown>;
+} | null {
+  const text = message.toLowerCase();
+  if (!/\b(jira|task|backlog|board|sprint)\b/i.test(text)) return null;
+  if (
+    /(tạo|thêm|create|new).{0,40}(jira|task|issue)|(jira|task|issue).{0,20}(mới|tạo|thêm)/i.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+
+  if (/backlog|rủi ro|ưu tiên/.test(text)) {
+    return { name: "jira_analyze_backlog", args: { scope: "ME" } };
+  }
+  if (/thống kê|tổng quan|bao nhiêu/.test(text)) {
+    return { name: "jira_my_work_summary", args: {} };
+  }
+
+  let statusGroup: "TODO" | "IN_PROGRESS" | "DONE" | "NOT_DONE" | "ALL" = "ALL";
+  if (/chưa hoàn thành|chưa xong|not done/.test(text)) statusGroup = "NOT_DONE";
+  else if (/đang làm|đang thực hiện|in progress/.test(text)) statusGroup = "IN_PROGRESS";
+  else if (/đã làm|hoàn thành|\bdone\b/.test(text)) statusGroup = "DONE";
+  else if (/\btodo\b|to do|cần làm/.test(text)) statusGroup = "TODO";
+
+  return { name: "jira_list_my_tasks", args: { statusGroup } };
 }
 
 function historyToMessages(history: string[]): ChatMessage[] {
@@ -461,6 +527,7 @@ function sanitizeReply(raw: string) {
 function readToolPayload(toolContent: string): {
   askUser?: string;
   summary?: string;
+  error?: string;
   ok?: boolean;
   cancelled?: boolean;
 } {
@@ -502,6 +569,14 @@ function statusLabel(toolName: string) {
       return "Đang tra cứu đơn chờ duyệt…";
     case "search_policy":
       return "Đang tìm quy định…";
+    case "jira_my_work_summary":
+      return "Đang tổng hợp công việc Jira…";
+    case "jira_list_my_tasks":
+      return "Đang tra cứu task Jira…";
+    case "jira_analyze_backlog":
+      return "Đang phân tích backlog Jira…";
+    case "propose_create_jira_task":
+      return "Đang chuẩn bị tạo Jira task…";
     case "propose_create_leave":
     case "propose_create_trip":
       return "Đang chuẩn bị đề xuất đơn…";

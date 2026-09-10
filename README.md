@@ -51,6 +51,40 @@ Hoặc dùng tab **Đăng ký** trên màn login để tạo user mới (tự c�
 
 Gắn GreenNode: điền `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` trong `.env`. Embedding RAG dùng model local (xem `EMBEDDING_MODEL`).
 
+## Kết nối Jira qua Atlassian Rovo MCP
+
+M-Mate hỗ trợ thống kê task cần làm/đang làm/đã làm, liệt kê theo project hoặc sprint, phát hiện task quá hạn/stale, phân tích backlog và tạo Jira task sau khi user xác nhận. Dữ liệu cá nhân và assignee của task mới được map theo email tài khoản M-Connect; chỉ role `MANAGER` được phân tích toàn project.
+
+Endpoint mặc định: `https://mcp.atlassian.com/v2/mcp?tools=all`.
+
+Personal API token (Basic auth):
+
+```dotenv
+JIRA_MCP_AUTH_TYPE=basic
+JIRA_MCP_EMAIL=your.email@msb.com.vn
+JIRA_MCP_API_TOKEN=<atlassian-personal-api-token>
+JIRA_MCP_CLOUD_ID=<optional-cloud-id>
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_MCP_ASSIGNEE_MODE=actor-email
+```
+
+Hoặc service account API key:
+
+```dotenv
+JIRA_MCP_AUTH_TYPE=bearer
+JIRA_MCP_API_KEY=<service-account-api-key>
+```
+
+Credential cần quyền Read/Search; để tạo task cần thêm quyền Write và tool `createJiraIssue`. Organization admin phải bật API-token authentication cho Rovo MCP. Sau khi cập nhật `.env`, restart `agent-service`.
+
+Ví dụ chat:
+
+- `Thống kê task Jira tôi cần làm, đang làm và đã làm`
+- `Liệt kê task chưa xong trong sprint hiện tại`
+- `Phân tích backlog Jira của tôi`
+- `Tạo task Jira trong project SCRUM, tiêu đề Chuẩn hóa API contract, priority High, hạn 2026-09-15`
+- Với quản lý: `Phân tích backlog project MCONNECT`
+
 ## Deploy VNG Cloud (vServer)
 
 Cùng một stack: Caddy (80/443) → web + `/api/agent` + `/api/hr`; Mongo không public. LLM vẫn gọi GreenNode MaaS.

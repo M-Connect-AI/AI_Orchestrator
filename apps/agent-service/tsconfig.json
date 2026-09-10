@@ -8,7 +8,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "declaration": false,
-    "incremental": true
+    "incremental": false
   },
   "include": ["src"]
 }

@@ -101,6 +101,105 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
   {
     type: "function",
     function: {
+      name: "jira_my_work_summary",
+      description:
+        "Thống kê nhanh task Jira của chính CBNV đang chat: cần làm, đang làm, đã làm, quá hạn, thiếu due date và lâu chưa cập nhật. Dùng khi user hỏi tổng quan công việc/task Jira của tôi.",
+      parameters: {
+        type: "object",
+        properties: {
+          projectKey: { type: "string", description: "Mã project Jira, ví dụ MCONNECT" },
+          sprint: {
+            type: "string",
+            enum: ["ACTIVE", "BACKLOG", "ALL"],
+            description: "ACTIVE=sprint hiện tại; BACKLOG=chưa vào sprint; ALL=tất cả",
+          },
+          updatedSince: { type: "string", description: "Chỉ lấy task cập nhật từ YYYY-MM-DD" },
+          maxResults: { type: "number", description: "Giới hạn task, tối đa theo cấu hình server" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "jira_list_my_tasks",
+      description:
+        "Liệt kê task Jira của chính CBNV theo trạng thái/project/sprint. Dùng cho câu hỏi task cần làm, đang làm, đã làm hoặc chưa làm.",
+      parameters: {
+        type: "object",
+        properties: {
+          projectKey: { type: "string" },
+          statusGroup: {
+            type: "string",
+            enum: ["TODO", "IN_PROGRESS", "DONE", "NOT_DONE", "ALL"],
+            description: "NOT_DONE gồm tất cả task chưa hoàn thành",
+          },
+          sprint: { type: "string", enum: ["ACTIVE", "BACKLOG", "ALL"] },
+          dueBefore: { type: "string", description: "Hạn hoàn thành trước/ngày YYYY-MM-DD" },
+          updatedSince: { type: "string", description: "Cập nhật từ YYYY-MM-DD" },
+          maxResults: { type: "number" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "jira_analyze_backlog",
+      description:
+        "Phân tích backlog Jira: cơ cấu trạng thái/priority, task quá hạn, thiếu due date, lâu chưa cập nhật và danh sách cần ưu tiên. Mặc định chỉ backlog của CBNV. MANAGER có thể phân tích toàn project khi scope=PROJECT và có projectKey.",
+      parameters: {
+        type: "object",
+        properties: {
+          scope: { type: "string", enum: ["ME", "PROJECT"] },
+          projectKey: {
+            type: "string",
+            description: "Bắt buộc với scope=PROJECT, ví dụ MCONNECT",
+          },
+          staleDays: {
+            type: "number",
+            description: "Số ngày không cập nhật để coi là stale, mặc định 14",
+          },
+          maxResults: { type: "number" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_create_jira_task",
+      description:
+        "Đề xuất tạo Jira issue mới và luôn gán cho chính CBNV đang chat. STAFF yêu cầu assign người khác thì KHÔNG được gọi tool này; phải trả lời rằng nhân viên chỉ được assign cho chính mình. KHÔNG tạo ngay — hệ thống phải hỏi user xác nhận. Chỉ gọi khi có projectKey và summary; mặc định issueType=Task.",
+      parameters: {
+        type: "object",
+        properties: {
+          projectKey: { type: "string", description: "Mã project Jira, ví dụ SCRUM" },
+          summary: { type: "string", description: "Tiêu đề task, từ 3 đến 255 ký tự" },
+          description: { type: "string", description: "Mô tả task dạng Markdown" },
+          issueType: { type: "string", enum: ["Task", "Story", "Bug", "Epic"] },
+          priority: {
+            type: "string",
+            enum: ["Highest", "High", "Medium", "Low", "Lowest"],
+          },
+          dueDate: { type: "string", description: "Due date dạng YYYY-MM-DD" },
+          labels: { type: "array", items: { type: "string" } },
+          assignToSprint: {
+            type: "boolean",
+            description: "true để Jira tự gán vào active sprint nếu có",
+          },
+        },
+        required: ["projectKey", "summary"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "propose_create_leave",
       description:
         "Đề xuất tạo đơn nghỉ phép mới. KHÔNG gửi ngay — hệ thống sẽ hỏi user xác nhận. Gọi khi đã đủ loại phép, ngày, lý do.",
@@ -268,7 +367,7 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
     function: {
       name: "confirm_pending_action",
       description:
-        "Thực thi thao tác đang chờ xác nhận (tạo/hủy/duyệt/từ chối/sửa đơn). Gọi khi user đồng ý (oke, ok, đồng ý, xác nhận, gửi đi, bấm nút…). Chỉ khi có pendingAction.",
+        "Thực thi thao tác đang chờ xác nhận (tạo Jira task hoặc tạo/hủy/duyệt/từ chối/sửa đơn HR). Gọi khi user đồng ý (oke, ok, đồng ý, xác nhận, gửi đi, bấm nút…). Chỉ khi có pendingAction.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },

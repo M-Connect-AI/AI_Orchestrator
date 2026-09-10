@@ -4,9 +4,12 @@ build
 .turbo
 .env
 .env.local
-.env.prod
+.env
 *.log
 .DS_Store
 coverage
 apps/web/dist
 *.pem
+.env
+.env.example
+.env.prod.example
