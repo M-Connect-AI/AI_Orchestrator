@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "nest build && nest start --watch",
     "build": "nest build",
+    "test": "nest build && node --test test/jira-summary.spec.cjs",
     "start": "node dist/main.js",
     "policy:ingest": "nest build && node dist/policy/policy-ingest.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
     "@msb/policy-docs": "workspace:*",
     "@msb/shared": "workspace:*",
     "@nestjs/common": "^11.1.3",

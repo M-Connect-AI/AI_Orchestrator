@@ -67,6 +67,16 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Xenova/multilingual-e5-small}
       QDRANT_URL: http://qdrant:6333
       QDRANT_POLICY_COLLECTION: ${QDRANT_POLICY_COLLECTION:-policy_chunks}
+      JIRA_MCP_URL: ${JIRA_MCP_URL:-https://mcp.atlassian.com/v2/mcp?tools=all}
+      JIRA_MCP_AUTH_TYPE: ${JIRA_MCP_AUTH_TYPE:-}
+      JIRA_MCP_EMAIL: ${JIRA_MCP_EMAIL:-}
+      JIRA_MCP_API_TOKEN: ${JIRA_MCP_API_TOKEN:-}
+      JIRA_MCP_API_KEY: ${JIRA_MCP_API_KEY:-}
+      JIRA_MCP_CLOUD_ID: ${JIRA_MCP_CLOUD_ID:-}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_MCP_ASSIGNEE_MODE: ${JIRA_MCP_ASSIGNEE_MODE:-actor-email}
+      JIRA_MCP_MAX_ISSUES: ${JIRA_MCP_MAX_ISSUES:-200}
+      JIRA_MCP_STALE_DAYS: ${JIRA_MCP_STALE_DAYS:-14}
     depends_on:
       mongo:
         condition: service_healthy

@@ -13,11 +13,13 @@ import { ToolAgentService } from "../agent/tool-agent.service";
 import { EmbeddingClient } from "../policy/embedding.client";
 import { PolicyRagService } from "../policy/policy-rag.service";
 import { QdrantPolicyClient } from "../policy/qdrant.client";
+import { JiraModule } from "../jira/jira.module";
 
 @Module({
   imports: [
     AuthModule,
     HrModule,
+    JiraModule,
     MongooseModule.forFeature([{ name: Thread.name, schema: ThreadSchema }]),
   ],
   providers: [
