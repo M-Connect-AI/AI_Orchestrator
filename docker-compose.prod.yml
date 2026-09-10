@@ -64,7 +64,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-qwen/qwen3.7-plus}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Xenova/multilingual-e5-small}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       QDRANT_URL: http://qdrant:6333
       QDRANT_POLICY_COLLECTION: ${QDRANT_POLICY_COLLECTION:-policy_chunks}
       JIRA_MCP_URL: ${JIRA_MCP_URL:-https://mcp.atlassian.com/v2/mcp?tools=all}
@@ -161,7 +161,7 @@ services:
     env_file:
       - .env.prod
     environment:
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Xenova/multilingual-e5-small}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-baai/bge-m3}
       QDRANT_URL: http://qdrant:6333
       QDRANT_POLICY_COLLECTION: ${QDRANT_POLICY_COLLECTION:-policy_chunks}
     depends_on:

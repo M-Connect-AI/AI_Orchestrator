@@ -1,49 +1,57 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
-type Extractor = (
-  text: string,
-  opts: { pooling: "mean"; normalize: boolean },
-) => Promise<{ data: Float32Array | number[] }>;
+const DEFAULT_EMBEDDING_MODEL = "baai/bge-m3";
 
-let extractorPromise: Promise<Extractor> | null = null;
+export type EmbedOpts = {
+  model?: string;
+  apiKey?: string;
+  baseURL?: string;
+  asQuery?: boolean;
+};
 
-const importEsm = new Function("m", "return import(m)") as (m: string) => Promise<any>;
-
-function embeddingModelName(override?: string) {
-  return (
-    override?.trim() ||
-    process.env.EMBEDDING_MODEL?.trim() ||
-    "Xenova/multilingual-e5-small"
-  );
-}
-
-async function getLocalExtractor(model: string): Promise<Extractor> {
-  if (!extractorPromise) {
-    extractorPromise = (async () => {
-      const mod = await importEsm("@xenova/transformers");
-      return (await mod.pipeline("feature-extraction", model)) as Extractor;
-    })();
-  }
-  return extractorPromise;
+function resolveModel(override?: string) {
+  return override?.trim() || process.env.EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
 }
 
 /**
- * Embed bằng model local (mặc định Xenova/multilingual-e5-small).
- * e5: document dùng prefix "passage:", query dùng "query:".
+ * Embed qua GreenNode MaaS OpenAI-compatible `/embeddings`.
+ * Model mặc định: baai/bge-m3 (1024-dim).
  */
-export async function embedTexts(
-  texts: string[],
-  opts: { model?: string; asQuery?: boolean } = {},
-): Promise<number[][]> {
+export async function embedTexts(texts: string[], opts: EmbedOpts = {}): Promise<number[][]> {
   if (!texts.length) return [];
-  const model = embeddingModelName(opts.model);
-  const extractor = await getLocalExtractor(model);
-  const prefix = opts.asQuery ? "query: " : "passage: ";
-  const vectors: number[][] = [];
-  for (const text of texts) {
-    const out = await extractor(`${prefix}${text}`, { pooling: "mean", normalize: true });
-    vectors.push(Array.from(out.data));
+
+  const model = resolveModel(opts.model);
+  const apiKey = (opts.apiKey ?? process.env.LLM_API_KEY)?.trim();
+  const baseURL = (opts.baseURL ?? process.env.LLM_BASE_URL)?.trim()?.replace(/\/$/, "");
+  if (!apiKey || !baseURL) {
+    throw new Error("Thiếu LLM_API_KEY / LLM_BASE_URL để gọi embedding GreenNode");
+  }
+
+  const res = await fetch(`${baseURL}/embeddings`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: texts.length === 1 ? texts[0] : texts,
+      encoding_format: "float",
+    }),
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    throw new Error(`Embedding HTTP ${res.status}: ${body.slice(0, 400)}`);
+  }
+
+  const data = JSON.parse(body) as {
+    data?: Array<{ embedding?: number[]; index?: number }>;
+  };
+  const rows = [...(data.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const vectors = rows.map((r) => r.embedding ?? []);
+  if (vectors.length !== texts.length || vectors.some((v) => !v.length)) {
+    throw new Error("Embedding API trả về số vector không khớp input");
   }
   return vectors;
 }
@@ -55,15 +63,22 @@ export class EmbeddingClient {
   constructor(private readonly config: ConfigService) {}
 
   model() {
-    return (
-      this.config.get<string>("EMBEDDING_MODEL")?.trim() ||
-      "Xenova/multilingual-e5-small"
-    );
+    return this.config.get<string>("EMBEDDING_MODEL")?.trim() || DEFAULT_EMBEDDING_MODEL;
   }
 
-  async embed(texts: string[], asQuery = false): Promise<number[][]> {
+  credentials() {
+    const apiKey = this.config.get<string>("LLM_API_KEY")?.trim();
+    const baseURL = this.config.get<string>("LLM_BASE_URL")?.trim()?.replace(/\/$/, "");
+    if (!apiKey || !baseURL) {
+      throw new Error("Thiếu LLM_API_KEY / LLM_BASE_URL để gọi embedding");
+    }
+    return { apiKey, baseURL };
+  }
+
+  async embed(texts: string[], _asQuery = false): Promise<number[][]> {
+    const { apiKey, baseURL } = this.credentials();
     this.log.debug(`embed ${texts.length} text(s) via ${this.model()}`);
-    return embedTexts(texts, { model: this.model(), asQuery });
+    return embedTexts(texts, { model: this.model(), apiKey, baseURL });
   }
 
   async embedQuery(text: string): Promise<number[]> {

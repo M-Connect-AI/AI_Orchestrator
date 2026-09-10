@@ -12,12 +12,12 @@ Hệ thống AI Agent thực thi nghiệp vụ nhân sự nội bộ (nghỉ ph�
 - **Qdrant** — vector DB cho tra cứu policy (semantic RAG)
 
 LLM + chat: GreenNode MaaS (OpenAI-compatible). Bắt buộc `LLM_API_KEY` trong `.env`.
-Embedding (RAG): model local `Xenova/multilingual-e5-small` (GreenNode hiện chỉ có chat model).
+Embedding (RAG): GreenNode `baai/bge-m3` → Qdrant.
 
 ### Policy RAG
 
 1. Thêm/sửa file trong `packages/policy-docs/policies/*.md`
-2. Chạy `pnpm policy:ingest` (embed local + ghi Qdrant; **không** có job định kỳ)
+2. Chạy `pnpm policy:ingest` (embed `baai/bge-m3` + ghi Qdrant; **không** có job định kỳ)
 3. Agent gọi tool `search_policy` → query Qdrant → cite nguồn
 
 Validate tạo đơn vẫn ở HRIS / rules — tách khỏi RAG.
@@ -49,7 +49,7 @@ Tài khoản demo (mật khẩu `password123`):
 
 Hoặc dùng tab **Đăng ký** trên màn login để tạo user mới (tự cấp `EMPxxx`).
 
-Gắn GreenNode: điền `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` trong `.env`. Embedding RAG dùng model local (xem `EMBEDDING_MODEL`).
+Gắn GreenNode: điền `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `EMBEDDING_MODEL=baai/bge-m3` trong `.env`.
 
 ## Kết nối Jira qua Atlassian Rovo MCP
 

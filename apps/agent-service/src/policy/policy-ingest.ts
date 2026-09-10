@@ -1,9 +1,9 @@
 /**
- * CLI: đọc packages/policy-docs/policies/*.md → embed local → ghi Qdrant.
+ * CLI: đọc packages/policy-docs/policies/*.md → embed GreenNode (bge-m3) → ghi Qdrant.
  *
  *   pnpm policy:ingest
  *
- * Cần Qdrant đang chạy. Embedding mặc định: Xenova/multilingual-e5-small (local).
+ * Cần Qdrant + LLM_API_KEY / LLM_BASE_URL. Mặc định EMBEDDING_MODEL=baai/bge-m3.
  */
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
@@ -47,19 +47,24 @@ async function main() {
   const model =
     process.env.EMBEDDING_MODEL?.trim() ||
     process.env.LLM_EMBEDDING_MODEL?.trim() ||
-    "Xenova/multilingual-e5-small";
+    "baai/bge-m3";
   const qdrantUrl = process.env.QDRANT_URL?.trim() || "http://127.0.0.1:6333";
   const collection =
     process.env.QDRANT_POLICY_COLLECTION?.trim() || POLICY_COLLECTION;
+  const apiKey = process.env.LLM_API_KEY?.trim();
+  const baseURL = process.env.LLM_BASE_URL?.trim();
+  if (!apiKey || !baseURL) {
+    throw new Error("Thiếu LLM_API_KEY / LLM_BASE_URL trong .env");
+  }
 
   const chunks = policyChunks();
   if (!chunks.length) {
     throw new Error("Không có chunk policy nào để ingest");
   }
 
-  console.log(`Embedding ${chunks.length} chunk bằng ${model} (local)…`);
+  console.log(`Embedding ${chunks.length} chunk bằng ${model} (GreenNode)…`);
   const texts = chunks.map((c) => `${c.title}\n${c.text}`);
-  const vectors = await embedTexts(texts, { model, asQuery: false });
+  const vectors = await embedTexts(texts, { model, apiKey, baseURL });
   const dim = vectors[0]?.length;
   if (!dim) throw new Error("Vector embedding rỗng");
 
