@@ -5,8 +5,8 @@
 body {
   margin: 0;
   font-family: "Segoe UI", system-ui, sans-serif;
-  background: #fff6ed;
-  color: #2a2118;
+  background: #fff3ec;
+  color: #1c1410;
 }
 
 .thinking-dots {
@@ -19,7 +19,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: #f58220;
+  background: #f15a22;
   display: block;
   animation: think-bounce 1s ease-in-out infinite;
 }
@@ -40,4 +40,9 @@ body {
     transform: translateY(-4px);
     opacity: 1;
   }
+}
+
+mark {
+  background: transparent;
+  color: inherit;
 }

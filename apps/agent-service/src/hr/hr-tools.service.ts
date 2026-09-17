@@ -6,6 +6,7 @@ import {
   overlapsDayRange,
   pickByOrdinal,
 } from "../agent/leave-query";
+import { formatVnDate, formatVnDateTime } from "../agent/datetime-vn";
 
 export type LeaveRow = {
   _id?: string;
@@ -146,6 +147,182 @@ export class HrToolsService {
     }
     return { count: items.length, items };
   }
+
+  calendarConflicts(actor: Actor, from: string, to: string) {
+    return this.hr.request<{
+      connected: boolean;
+      configured: boolean;
+      microsoftEmail: string | null;
+      events: {
+        id: string;
+        subject: string;
+        start: string;
+        end: string;
+        showAs: string;
+        isAllDay: boolean;
+        location?: string;
+      }[];
+      error?: string;
+    }>(
+      actor.token,
+      `/outlook/conflicts?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    );
+  }
+
+  listOutlookCalendar(actor: Actor, from: string, to: string) {
+    return this.hr.request<{
+      connected: boolean;
+      configured: boolean;
+      microsoftEmail: string | null;
+      events: {
+        id: string;
+        subject: string;
+        start: string;
+        end: string;
+        showAs: string;
+        isAllDay: boolean;
+        location?: string;
+      }[];
+      error?: string;
+    }>(
+      actor.token,
+      `/outlook/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    );
+  }
+
+  listOutlookMails(
+    actor: Actor,
+    opts: {
+      unreadOnly?: boolean;
+      top?: number;
+      search?: string;
+      from?: string;
+      to?: string;
+    } = {},
+  ) {
+    const q = new URLSearchParams();
+    if (opts.unreadOnly) q.set("unreadOnly", "true");
+    if (opts.top) q.set("top", String(opts.top));
+    if (opts.search) q.set("search", opts.search);
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    const qs = q.toString();
+    return this.hr.request<{
+      connected: boolean;
+      configured: boolean;
+      microsoftEmail: string | null;
+      count?: number;
+      from?: string | null;
+      to?: string | null;
+      unreadOnly?: boolean;
+      mails?: {
+        id: string;
+        subject: string;
+        from: string;
+        receivedAt: string;
+        preview: string;
+        isRead: boolean;
+        hasAttachments: boolean;
+        importance: string;
+      }[];
+      error?: string;
+    }>(actor.token, `/outlook/mails${qs ? `?${qs}` : ""}`);
+  }
+
+  getOutlookMail(actor: Actor, messageId: string) {
+    return this.hr.request<{
+      connected: boolean;
+      configured: boolean;
+      microsoftEmail: string | null;
+      mail?: {
+        id: string;
+        subject: string;
+        from: string;
+        receivedAt: string;
+        preview: string;
+        body?: string;
+        isRead: boolean;
+        hasAttachments: boolean;
+        importance: string;
+      };
+      error?: string;
+    }>(
+      actor.token,
+      `/outlook/mail?id=${encodeURIComponent(messageId)}`,
+    );
+  }
+
+  createOutlookEvent(
+    actor: Actor,
+    input: {
+      subject: string;
+      start: string;
+      end: string;
+      timeZone?: string;
+      isAllDay?: boolean;
+      location?: string;
+      body?: string;
+      attendees?: string[];
+    },
+  ) {
+    return this.hr.request<{
+      connected: boolean;
+      configured: boolean;
+      microsoftEmail: string | null;
+      event?: {
+        id: string;
+        subject: string;
+        start: string;
+        end: string;
+        location?: string;
+        isAllDay: boolean;
+        webLink?: string;
+      };
+      error?: string;
+    }>(actor.token, "/outlook/events", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  replyOutlookMail(actor: Actor, messageId: string, comment: string) {
+    return this.hr.request<{
+      connected: boolean;
+      configured: boolean;
+      microsoftEmail: string | null;
+      replied?: boolean;
+      messageId?: string;
+      error?: string;
+    }>(actor.token, "/outlook/mail/reply", {
+      method: "POST",
+      body: JSON.stringify({ messageId, comment }),
+    });
+  }
+}
+
+export type CalendarConflictsResult = Awaited<
+  ReturnType<HrToolsService["calendarConflicts"]>
+>;
+
+/** Cảnh báo lịch — không chặn tạo đơn; chỉ gắn vào lời hỏi xác nhận. */
+export function formatCalendarWarning(result: CalendarConflictsResult) {
+  if (!result.configured) return "";
+  if (!result.connected) {
+    return "\n\n(Chưa kết nối Outlook — bỏ qua kiểm tra lịch. Bấm “Kết nối Outlook” trên thanh trên nếu muốn cảnh báo sự kiện.)";
+  }
+  if (!result.events.length) {
+    return "\n\nLịch Outlook: không có sự kiện trùng khoảng ngày này.";
+  }
+  const lines = result.events.slice(0, 8).map((e) => {
+    const when = e.isAllDay
+      ? `${formatVnDate(e.start.slice(0, 10))} (cả ngày)`
+      : `${formatVnDateTime(e.start)} → ${formatVnDateTime(e.end)}`;
+    const loc = e.location ? ` @ ${e.location}` : "";
+    return `- ${e.subject}${loc} (${when}, ${e.showAs})`;
+  });
+  const more =
+    result.events.length > 8 ? `\n- … và ${result.events.length - 8} sự kiện khác` : "";
+  return `\n\n⚠️ Cảnh báo lịch Outlook (${result.microsoftEmail ?? "đã kết nối"}): có ${result.events.length} sự kiện trùng khoảng ngày:\n${lines.join("\n")}${more}\nBạn vẫn có thể xác nhận gửi đơn.`;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -206,35 +383,24 @@ export function formatLeaveList(rows: LeaveRow[], scopeNote?: string) {
   const ids = rows.map((r) => String(r._id ?? r.id));
   const pending = rows.filter((r) => r.status === "PENDING");
   const byType = new Map<string, number>();
-  const byPerson = new Map<string, number>();
   const byStatus = new Map<string, number>();
   let days = 0;
   for (const r of rows) {
     byType.set(r.type, (byType.get(r.type) ?? 0) + 1);
     byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1);
-    const who = r.employeeName ? `${r.employeeName} (${r.employeeCode})` : r.employeeCode;
-    byPerson.set(who, (byPerson.get(who) ?? 0) + 1);
     days += r.days ?? 0;
   }
   const typeLine = [...byType.entries()]
     .map(([t, n]) => `${TYPE_LABEL[t] ?? t}: ${n}`)
     .join(", ");
-  const personLine = [...byPerson.entries()].map(([name, n]) => `${name}: ${n} đơn`).join("; ");
   const statusLine = [...byStatus.entries()]
     .map(([s, n]) => `${STATUS_LABEL[s] ?? s}: ${n}`)
     .join(", ");
-  const detail = rows
-    .map((r, i) => {
-      const who = r.employeeName ?? r.employeeCode;
-      return `- (${i + 1}) ${who}: ${TYPE_LABEL[r.type] ?? r.type} ${r.from} → ${r.to} (${r.days} ngày, ${STATUS_LABEL[r.status] ?? r.status}, ${r.reason})`;
-    })
-    .join("\n");
   const stats = [
     `Có ${rows.length} đơn khớp${scopeNote ? ` (${scopeNote})` : ""} — tổng ${days} ngày, trong đó ${pending.length} đơn chờ duyệt.`,
     statusLine ? `Theo trạng thái: ${statusLine}.` : "",
     typeLine ? `Theo loại: ${typeLine}.` : "",
-    personLine ? `Theo nhân viên: ${personLine}.` : "",
-    detail ? `Chi tiết:\n${detail}` : "",
+    "Chi tiết đơn đã hiện trên thẻ (lấy từ hệ thống, không liệt kê lại).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -273,9 +439,7 @@ export function friendlyConfirmAsk(
 }
 
 function formatVnDay(iso: string) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
-  return `${Number(m[3])}/${Number(m[2])}/${m[1]}`;
+  return formatVnDate(iso) || iso;
 }
 
 export function formatTripList(rows: TripRow[], scopeNote?: string) {
@@ -288,17 +452,10 @@ export function formatTripList(rows: TripRow[], scopeNote?: string) {
   const statusLine = [...byStatus.entries()]
     .map(([s, n]) => `${STATUS_LABEL[s] ?? s}: ${n}`)
     .join(", ");
-  const detail = rows
-    .map((r, i) => {
-      const who = r.employeeName ?? r.employeeCode;
-      const date = r.from === r.to ? formatVnDay(r.from) : `${formatVnDay(r.from)} → ${formatVnDay(r.to)}`;
-      return `- (${i + 1}) ${who}: ${r.destination} ${date} (${STATUS_LABEL[r.status] ?? r.status}, ${r.purpose})`;
-    })
-    .join("\n");
   const stats = [
     `Có ${rows.length} đơn công tác khớp${scopeNote ? ` (${scopeNote})` : ""}, trong đó ${pending.length} đơn chờ duyệt.`,
     statusLine ? `Theo trạng thái: ${statusLine}.` : "",
-    detail ? `Chi tiết:\n${detail}` : "",
+    "Chi tiết đơn đã hiện trên thẻ (lấy từ hệ thống, không liệt kê lại).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -331,29 +488,18 @@ export function summarizePendingLeaves(rows: LeaveRow[], scopeNote?: string) {
   const pending = rows.filter((r) => r.status === "PENDING");
   const ids = pending.map((r) => String(r._id ?? r.id));
   const byType = new Map<string, number>();
-  const byPerson = new Map<string, number>();
   let days = 0;
   for (const r of pending) {
     byType.set(r.type, (byType.get(r.type) ?? 0) + 1);
-    const who = r.employeeName ? `${r.employeeName} (${r.employeeCode})` : r.employeeCode;
-    byPerson.set(who, (byPerson.get(who) ?? 0) + 1);
     days += r.days ?? 0;
   }
   const typeLine = [...byType.entries()]
     .map(([t, n]) => `${TYPE_LABEL[t] ?? t}: ${n}`)
     .join(", ");
-  const personLine = [...byPerson.entries()].map(([name, n]) => `${name}: ${n} đơn`).join("; ");
-  const detail = pending
-    .map((r) => {
-      const who = r.employeeName ?? r.employeeCode;
-      return `- ${who}: ${TYPE_LABEL[r.type] ?? r.type} ${r.from} → ${r.to} (${r.days} ngày, ${r.reason})`;
-    })
-    .join("\n");
   const stats = [
     `Có ${pending.length} đơn nghỉ phép chờ duyệt${scopeNote ? ` (${scopeNote})` : ""} — tổng ${days} ngày.`,
     typeLine ? `Theo loại: ${typeLine}.` : "",
-    personLine ? `Theo nhân viên: ${personLine}.` : "",
-    detail ? `Chi tiết:\n${detail}` : "",
+    "Chi tiết đơn đã hiện trên thẻ (lấy từ hệ thống, không liệt kê lại).",
   ]
     .filter(Boolean)
     .join("\n");

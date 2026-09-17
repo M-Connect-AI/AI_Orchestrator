@@ -85,14 +85,12 @@ export function formatJiraSummary(
 ) {
   const staleDays = clamp(opts.staleDays ?? 14, 1, 365);
   const stats = summarizeJiraIssues(issues, { staleDays, today: opts.today });
-  const lines = [
-    `${title}: ${stats.total} task${opts.truncated ? " (đã chạm giới hạn truy vấn)" : ""}.`,
-    `Cần làm: ${stats.toDo}; đang làm: ${stats.inProgress}; đã làm: ${stats.done}${stats.unknown ? `; chưa phân loại: ${stats.unknown}` : ""}.`,
-    `Quá hạn chưa xong: ${stats.overdue}; chưa xong và không có due date: ${stats.withoutDueDate}; không cập nhật quá ${staleDays} ngày: ${stats.stale}.`,
-    mapLine("Theo trạng thái", stats.byStatus),
-    mapLine("Theo priority", stats.byPriority),
-  ].filter(Boolean);
-  return { stats, summary: lines.join("\n") };
+  const extra = opts.truncated ? " (đã chạm giới hạn truy vấn)" : "";
+  const summary =
+    stats.total === 0
+      ? `${title}: chưa có task khớp bộ lọc. Số liệu đã hiện trên thẻ.`
+      : `${title}: ${stats.total} task${extra}. Số liệu đã hiện trên thẻ.`;
+  return { stats, summary };
 }
 
 export function formatJiraList(issues: JiraIssue[], limit = 30) {
@@ -107,14 +105,6 @@ export function formatJiraList(issues: JiraIssue[], limit = 30) {
 
 function increment(target: Record<string, number>, key: string) {
   target[key] = (target[key] ?? 0) + 1;
-}
-
-function mapLine(label: string, values: Record<string, number>) {
-  const body = Object.entries(values)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([key, count]) => `${key}: ${count}`)
-    .join(", ");
-  return body ? `${label}: ${body}.` : "";
 }
 
 function validDate(value: string | undefined) {

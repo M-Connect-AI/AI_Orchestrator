@@ -5,6 +5,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { AuthModule } from "./auth/auth.module";
 import { LeavesModule } from "./leaves/leaves.module";
 import { TripsModule } from "./trips/trips.module";
+import { OutlookModule } from "./outlook/outlook.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -27,6 +28,7 @@ import { HealthController } from "./health.controller";
     AuthModule,
     LeavesModule,
     TripsModule,
+    OutlookModule,
   ],
   controllers: [HealthController],
 })

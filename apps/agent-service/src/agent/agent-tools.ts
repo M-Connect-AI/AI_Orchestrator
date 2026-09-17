@@ -12,6 +12,131 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
   {
     type: "function",
     function: {
+      name: "outlook_list_mails",
+      description:
+        "Đọc hộp thư Outlook của CHÍNH user. BẮT BUỘC truyền from/to (YYYY-MM-DD) khi user nói hôm nay / hôm qua / ngày mai / tuần này / tháng này / ngày cụ thể — chỉ trả mail trong khoảng đó. Không có khoảng ngày thì lấy mail gần đây. unreadOnly=true chỉ khi hỏi chưa đọc. search = từ khóa tuỳ chọn.",
+      parameters: {
+        type: "object",
+        properties: {
+          unreadOnly: {
+            type: "boolean",
+            description: "true chỉ khi user hỏi mail chưa đọc / chưa xem. Mặc định false.",
+          },
+          top: { type: "number", description: "Số mail tối đa, 1–50, mặc định 15" },
+          search: { type: "string", description: "Từ khóa tìm (tuỳ chọn)" },
+          from: {
+            type: "string",
+            description:
+              "YYYY-MM-DD bắt đầu (theo VN). Bắt buộc nếu user nêu khoảng thời gian. Hôm nay → from=to=hôm nay.",
+          },
+          to: {
+            type: "string",
+            description: "YYYY-MM-DD kết thúc inclusive. Một ngày thì = from. Tuần này = thứ 2 → chủ nhật tuần hiện tại.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "outlook_get_mail",
+      description:
+        "Lấy chi tiết / nội dung một mail Outlook. Ưu tiên ordinal (1 = mail đầu danh sách vừa liệt kê). Chỉ dùng messageId khi biết chắc id ngắn; Graph id rất dài — ưu tiên ordinal từ outlook_list_mails.",
+      parameters: {
+        type: "object",
+        properties: {
+          ordinal: {
+            type: "string",
+            description:
+              "Thứ tự trong danh sách mail vừa xem: \"1\" = đầu tiên, \"2\", \"last\". Ưu tiên dùng khi user nói mail đầu / mail thứ N.",
+          },
+          messageId: {
+            type: "string",
+            description: "Id mail từ outlook_list_mails (chỉ khi không dùng được ordinal)",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "outlook_list_calendar",
+      description:
+        "Lấy lịch họp / sự kiện Outlook của CHÍNH user trong khoảng ngày. Dùng khi hỏi hôm nay có họp gì, lịch tuần này, lịch ngày mai… from/to dạng YYYY-MM-DD (một ngày thì from=to).",
+      parameters: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "YYYY-MM-DD" },
+          to: { type: "string", description: "YYYY-MM-DD" },
+        },
+        required: ["from", "to"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_create_outlook_event",
+      description:
+        "Đề xuất TẠO sự kiện trên lịch Outlook của CHÍNH user. KHÔNG tạo ngay — phải chờ user xác nhận. Cần subject + start; end mặc định +1 giờ nếu thiếu. Giờ theo VN (+7).",
+      parameters: {
+        type: "object",
+        properties: {
+          subject: { type: "string", description: "Tiêu đề sự kiện" },
+          start: {
+            type: "string",
+            description: "Bắt đầu: YYYY-MM-DDTHH:mm hoặc dd/mm/yyyy HH:mm (giờ VN)",
+          },
+          end: {
+            type: "string",
+            description: "Kết thúc cùng định dạng; nếu thiếu = start + 1 giờ",
+          },
+          location: { type: "string", description: "Địa điểm (tuỳ chọn)" },
+          body: { type: "string", description: "Mô tả / nội dung (tuỳ chọn)" },
+          attendees: {
+            type: "array",
+            items: { type: "string" },
+            description: "Email người tham dự (tuỳ chọn)",
+          },
+          isAllDay: { type: "boolean", description: "true = cả ngày" },
+        },
+        required: ["subject", "start"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_reply_outlook_mail",
+      description:
+        "Đề xuất TRẢ LỜI một mail Outlook (reply). KHÔNG gửi ngay — phải chờ user xác nhận. Ưu tiên ordinal từ danh sách vừa list; comment = nội dung trả lời.",
+      parameters: {
+        type: "object",
+        properties: {
+          ordinal: {
+            type: "string",
+            description: "Mail thứ N trong danh sách vừa xem (\"1\", \"2\", \"last\")",
+          },
+          messageId: {
+            type: "string",
+            description: "Chỉ khi không dùng được ordinal",
+          },
+          comment: { type: "string", description: "Nội dung trả lời (text)" },
+        },
+        required: ["comment"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "list_pending_approvals",
       description:
         "ƯU TIÊN khi user hỏi chung về đơn cần duyệt / chờ phê duyệt / có đơn nào để duyệt (không nói rõ chỉ nghỉ phép hay chỉ công tác). Trả về CẢ đơn nghỉ phép PENDING và đơn công tác PENDING trong một lần. Không dùng list_leaves/list_trips riêng cho câu hỏi chung này.",
@@ -202,7 +327,7 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
     function: {
       name: "propose_create_leave",
       description:
-        "Đề xuất tạo đơn nghỉ phép mới. KHÔNG gửi ngay — hệ thống sẽ hỏi user xác nhận. Gọi khi đã đủ loại phép, ngày, lý do.",
+        "Đề xuất tạo đơn nghỉ phép mới. KHÔNG gửi ngay — hệ thống sẽ hỏi user xác nhận (kèm cảnh báo lịch Outlook nếu đã kết nối). Gọi khi đã đủ loại phép, ngày, lý do.",
       parameters: {
         type: "object",
         properties: {
@@ -221,7 +346,7 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
     function: {
       name: "propose_create_trip",
       description:
-        "Đề xuất tạo đơn công tác. KHÔNG gửi ngay — cần user xác nhận. Cần địa điểm, ngày đi/về, mục đích.",
+        "Đề xuất tạo đơn công tác. KHÔNG gửi ngay — cần user xác nhận (kèm cảnh báo lịch Outlook nếu đã kết nối). Cần địa điểm, ngày đi/về, mục đích.",
       parameters: {
         type: "object",
         properties: {

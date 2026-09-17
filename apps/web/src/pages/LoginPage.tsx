@@ -59,7 +59,7 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen bg-msb-cream flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-white rounded-xl p-8 space-y-5 border border-msb-mist">
+      <div className="w-full max-w-md bg-white rounded-2xl p-8 space-y-5 border border-msb-mist shadow-sm">
         <div>
           <p className="text-xs tracking-widest uppercase text-msb-orange font-semibold">
             MSB AI Hackathon
@@ -141,7 +141,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full bg-msb-orange hover:bg-msb-orange-dark text-white py-2.5 rounded-lg font-medium disabled:opacity-60"
+              className="w-full bg-msb-orange hover:bg-msb-orange-dark text-white py-2.5 rounded-full font-medium disabled:opacity-60"
             >
               {busy ? "Đang vào..." : "Đăng nhập"}
             </button>
@@ -217,7 +217,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full bg-msb-orange hover:bg-msb-orange-dark text-white py-2.5 rounded-lg font-medium disabled:opacity-60"
+              className="w-full bg-msb-orange hover:bg-msb-orange-dark text-white py-2.5 rounded-full font-medium disabled:opacity-60"
             >
               {busy ? "Đang tạo..." : "Đăng ký"}
             </button>

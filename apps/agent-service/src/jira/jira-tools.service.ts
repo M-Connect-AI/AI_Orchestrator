@@ -3,7 +3,6 @@ import { ConfigService } from "@nestjs/config";
 import { Actor } from "../auth/jwt-auth.guard";
 import { JiraMcpClient, toolResultPayload } from "./jira-mcp.client";
 import {
-  formatJiraList,
   formatJiraSummary,
   JiraIssue,
 } from "./jira-summary";
@@ -63,12 +62,11 @@ export class JiraToolsService {
       staleDays: this.staleDays(),
       truncated: result.truncated,
     });
-    const detail = formatJiraList(result.issues);
     return {
       ...formatted,
-      summary: [formatted.summary, detail ? `Chi tiết:\n${detail}` : "Không có task khớp bộ lọc."].join(
-        "\n",
-      ),
+      summary: result.issues.length
+        ? `${formatted.summary} Danh sách task nằm trên thẻ.`
+        : formatted.summary,
       issues: result.issues,
       jql,
       truncated: result.truncated,
@@ -108,13 +106,11 @@ export class JiraToolsService {
       .filter((issue) => issue.statusCategory !== "DONE")
       .sort(compareBacklogPriority)
       .slice(0, 10);
-    const detail = formatJiraList(priorityItems, 10);
     return {
       ...formatted,
-      summary: [
-        formatted.summary,
-        detail ? `Các task nên ưu tiên xem xét:\n${detail}` : "Không có task backlog khớp bộ lọc.",
-      ].join("\n"),
+      summary: priorityItems.length
+        ? `${formatted.summary} Các task nên ưu tiên nằm trên thẻ.`
+        : formatted.summary,
       issues: result.issues,
       priorityItems,
       jql,

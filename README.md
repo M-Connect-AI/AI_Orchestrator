@@ -51,6 +51,63 @@ Hoặc dùng tab **Đăng ký** trên màn login để tạo user mới (tự c�
 
 Gắn GreenNode: điền `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `EMBEDDING_MODEL=baai/bge-m3` trong `.env`.
 
+## Chat `uiAction` (điều hướng FE/Mobile)
+
+Mỗi lượt chat SSE `done` kèm `uiAction` (có thể `null`):
+
+| key | Ý nghĩa | Client nên làm |
+| --- | --- | --- |
+| `LEAVE_RESULTS` | Đơn nghỉ phép | Mở màn nghỉ phép (`path`: `/leaves`) |
+| `TRIP_RESULTS` | Đơn công tác | Mở màn công tác (`path`: `/trips`) |
+| `OUTLOOK_CALENDAR` | Lịch Outlook | Mở `url` (Outlook web / deep link) |
+| `OUTLOOK_MAIL` | Hộp thư Outlook | Mở `url` mail |
+| `JIRA_ISSUE` | Issue / board Jira | Mở `url` Jira |
+| `OUTLOOK_CONNECT` | Chưa nối Outlook | Chạy flow kết nối OAuth trong app |
+
+Payload:
+
+```json
+{
+  "key": "LEAVE_RESULTS",
+  "label": "Xem đơn nghỉ phép",
+  "path": "/leaves",
+  "url": "https://..."
+}
+```
+
+Agent **không** nhắc “vào tab Kết quả” trong text — UI hiện nút theo `label`. Mobile map `LEAVE_RESULTS` / `TRIP_RESULTS` sang 2 màn riêng. Outlook/Jira chưa có màn in-app nên dùng link ngoài (và `webLink` sự kiện nếu Graph trả về).
+
+**Rich chat (KPI / chart / highlight / gợi ý):** SSE `done` và GET thread còn `blocks[]` + `highlights[]` + `suggestions[]`. Hướng dẫn mobile: [`docs/mobile-chat-ui.md`](docs/mobile-chat-ui.md).
+
+## Outlook Calendar + Mail (tuỳ chọn)
+
+Giữ login HR; sau khi vào app, bấm **Kết nối Outlook** để consent Graph `Calendars.ReadWrite` + `Mail.ReadWrite` + `Mail.Send`.
+
+Agent có thể:
+- Hỏi lịch họp hôm nay / khoảng ngày → `outlook_list_calendar`
+- **Tạo sự kiện lịch** → `propose_create_outlook_event` (có xác nhận)
+- Mail chưa đọc / tìm mail / tóm tắt → `outlook_list_mails` + `outlook_get_mail`
+- **Trả lời mail** → `propose_reply_outlook_mail` (có xác nhận)
+- Xin nghỉ/công tác → cảnh báo trùng lịch (`/outlook/conflicts`)
+
+1. Azure Portal → App registrations → API permissions (Delegated): `User.Read`, **`Calendars.ReadWrite`**, **`Mail.ReadWrite`**, **`Mail.Send`**
+2. Redirect URI (**Web**): `http://localhost:3002/outlook/callback`
+3. `.env`:
+
+```bash
+MS_TENANT_ID=common
+MS_CLIENT_ID=...
+MS_CLIENT_SECRET=...
+MS_REDIRECT_URI=http://localhost:3002/outlook/callback
+WEB_ORIGIN=http://localhost:5173
+# MS_GRAPH_SCOPES=openid profile email offline_access User.Read Calendars.ReadWrite Mail.ReadWrite Mail.Send
+```
+
+4. Restart `hr-mock-service` + `agent-service`.
+5. Nếu đã nối Outlook trước đó: **Ngắt** rồi **Kết nối lại** để consent thêm quyền ghi lịch/mail.
+
+Nếu chưa có `MS_CLIENT_ID`, hệ thống bỏ qua Outlook.
+
 ## Kết nối Jira qua Atlassian Rovo MCP
 
 M-Mate hỗ trợ thống kê task cần làm/đang làm/đã làm, liệt kê theo project hoặc sprint, phát hiện task quá hạn/stale, phân tích backlog và tạo Jira task sau khi user xác nhận. Dữ liệu cá nhân và assignee của task mới được map theo email tài khoản M-Connect; chỉ role `MANAGER` được phân tích toàn project.

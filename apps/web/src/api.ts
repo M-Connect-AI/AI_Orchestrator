@@ -1,5 +1,15 @@
+import type {
+  ChatBlock,
+  ChatHighlight,
+  ChatSuggestion,
+  ChatUiAction as SharedChatUiAction,
+} from "@msb/shared";
+
 export const HR_API = import.meta.env.VITE_HR_API_URL ?? "http://localhost:3002";
 export const AGENT_API = import.meta.env.VITE_AGENT_API_URL ?? "http://localhost:3001";
+
+export type ChatUiAction = SharedChatUiAction;
+export type { ChatBlock, ChatHighlight, ChatSuggestion };
 
 export type SessionUser = {
   id: string;
@@ -36,13 +46,16 @@ export function clearSession() {
 }
 
 export async function hrFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (init?.body != null && !headers["Content-Type"] && !headers["content-type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   const res = await fetch(`${HR_API}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -102,6 +115,27 @@ export async function register(input: RegisterInput): Promise<Session> {
   return data;
 }
 
+export type OutlookStatus = {
+  configured: boolean;
+  connected: boolean;
+  microsoftEmail: string | null;
+};
+
+export function outlookStatus(token: string) {
+  return hrFetch<OutlookStatus>("/outlook/status", token);
+}
+
+export async function outlookAuthUrl(token: string) {
+  return hrFetch<{ url: string }>("/outlook/auth-url", token);
+}
+
+export function outlookDisconnect(token: string) {
+  return hrFetch<{ connected: boolean }>("/outlook/disconnect", token, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export type ChatDone = {
   threadId: string;
   reply: string;
@@ -112,6 +146,10 @@ export type ChatDone = {
   } | null;
   executed: unknown;
   citations: string[];
+  uiAction: ChatUiAction | null;
+  blocks: ChatBlock[];
+  highlights: ChatHighlight[];
+  suggestions: ChatSuggestion[];
 };
 
 export async function agentFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
@@ -136,7 +174,14 @@ export type ThreadSummary = {
 
 export type ThreadDetail = {
   threadId: string;
-  messages: { role: "user" | "assistant"; content: string }[];
+  messages: {
+    role: "user" | "assistant";
+    content: string;
+    blocks?: ChatBlock[];
+    highlights?: ChatHighlight[];
+    uiAction?: ChatUiAction | null;
+    suggestions?: ChatSuggestion[];
+  }[];
   pendingAction: ChatDone["confirm"];
 };
 
@@ -153,6 +198,9 @@ export type StreamHandlers = {
   onToken?: (text: string) => void;
   onConfirm?: (confirm: ChatDone["confirm"]) => void;
   onResult?: (executed: unknown) => void;
+  onUiAction?: (action: ChatUiAction | null) => void;
+  onBlocks?: (blocks: ChatBlock[], highlights: ChatHighlight[]) => void;
+  onSuggestions?: (suggestions: ChatSuggestion[]) => void;
 };
 
 export async function streamChat(
@@ -182,6 +230,10 @@ export async function streamChat(
     confirm: null,
     executed: null,
     citations: [],
+    uiAction: null,
+    blocks: [],
+    highlights: [],
+    suggestions: [],
   };
 
   const consume = (block: string) => {
@@ -208,7 +260,20 @@ export async function streamChat(
     }
     if (event === "done") {
       done.threadId = String(data.threadId ?? done.threadId);
+      if (typeof data.reply === "string" && data.reply) done.reply = data.reply;
+      if ("confirm" in data) {
+        done.confirm = (data.confirm as ChatDone["confirm"]) ?? null;
+      }
       done.citations = (data.citations as string[]) ?? [];
+      done.uiAction = (data.uiAction as ChatUiAction | null) ?? null;
+      done.blocks = Array.isArray(data.blocks) ? (data.blocks as ChatBlock[]) : [];
+      done.highlights = Array.isArray(data.highlights) ? (data.highlights as ChatHighlight[]) : [];
+      done.suggestions = Array.isArray(data.suggestions)
+        ? (data.suggestions as ChatSuggestion[])
+        : [];
+      handlers.onUiAction?.(done.uiAction);
+      handlers.onBlocks?.(done.blocks, done.highlights);
+      handlers.onSuggestions?.(done.suggestions);
     }
     if (event === "error") throw new Error(String(data.message ?? "Agent error"));
   };
@@ -224,6 +289,6 @@ export async function streamChat(
     }
     if (eof) break;
   }
-  done.reply = reply;
+  if (!done.reply) done.reply = reply;
   return done;
 }

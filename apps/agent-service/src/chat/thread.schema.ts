@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { HydratedDocument } from "mongoose";
 import { Slots } from "../agent/schema";
-import { ChatConfirmAction } from "@msb/shared";
+import { ChatBlock, ChatConfirmAction, ChatHighlight, ChatSuggestion, ChatUiAction } from "@msb/shared";
 
 export type ThreadDocument = HydratedDocument<Thread>;
 
@@ -18,11 +18,22 @@ export class Thread {
       {
         role: { type: String, enum: ["user", "assistant"], required: true },
         content: { type: String, default: "" },
+        blocks: { type: Array, required: false },
+        highlights: { type: Array, required: false },
+        uiAction: { type: Object, required: false },
+        suggestions: { type: Array, required: false },
       },
     ],
     default: [],
   })
-  messages!: { role: "user" | "assistant"; content: string }[];
+  messages!: {
+    role: "user" | "assistant";
+    content: string;
+    blocks?: ChatBlock[];
+    highlights?: ChatHighlight[];
+    uiAction?: ChatUiAction | null;
+    suggestions?: ChatSuggestion[];
+  }[];
 
   @Prop({ type: Object, default: {} })
   slots!: Slots;

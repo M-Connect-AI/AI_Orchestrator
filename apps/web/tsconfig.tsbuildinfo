@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/vite-env.d.ts","./src/pages/chatpage.tsx","./src/pages/loginpage.tsx","./src/pages/resultspage.tsx","./src/pages/shell.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/vite-env.d.ts","./src/chat/chatrich.tsx","./src/pages/chatpage.tsx","./src/pages/leavespage.tsx","./src/pages/loginpage.tsx","./src/pages/shell.tsx","./src/pages/tripspage.tsx"],"version":"5.9.3"}

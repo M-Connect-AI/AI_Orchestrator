@@ -16,7 +16,9 @@ export default function App() {
       <Route element={<RequireAuth />}>
         <Route element={<Shell />}>
           <Route index element={<></>} />
-          <Route path="results" element={<></>} />
+          <Route path="leaves" element={<></>} />
+          <Route path="trips" element={<></>} />
+          <Route path="results" element={<Navigate to="/leaves" replace />} />
         </Route>
       </Route>
     </Routes>

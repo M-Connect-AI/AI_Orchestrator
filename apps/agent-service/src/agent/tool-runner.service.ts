@@ -1,11 +1,12 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ChatConfirmAction, LeaveType, RequestStatus } from "@msb/shared";
+import { ChatConfirmAction, ChatUiAction, LeaveType, RequestStatus } from "@msb/shared";
 import { validateLeave, validateTrip } from "@msb/policy-docs";
 import { Actor } from "../auth/jwt-auth.guard";
 import {
   applyOrdinal,
   filterLeaves,
   filterPendingLeaves,
+  formatCalendarWarning,
   formatLeaveList,
   formatTripList,
   friendlyConfirmAsk,
@@ -27,6 +28,22 @@ import {
   pickByOrdinal,
 } from "./leave-query";
 import { emptySlots, normalizeVnDate, Slots } from "./schema";
+import {
+  formatVnDate,
+  formatVnDateRange,
+  formatVnDateTime,
+  parseVnDateTimeLocal,
+  addMinutesLocal,
+} from "./datetime-vn";
+import {
+  leaveResultsAction,
+  tripResultsAction,
+  jiraIssueAction,
+  outlookCalendarAction,
+  outlookConnectAction,
+  outlookMailAction,
+  uiActionFromPendingTool,
+} from "./ui-action";
 import {
   CreateJiraTaskInput,
   JiraTaskFilter,
@@ -50,6 +67,8 @@ export type ToolRunSideEffects = {
   mutated: boolean;
   citations: string[];
   slots: Slots;
+  /** Nút điều hướng cho frontend/mobile */
+  uiAction: ChatUiAction | null;
 };
 
 export type ToolRunResult = {
@@ -89,6 +108,16 @@ export class ToolRunnerService {
           return this.listTrips(args, ctx);
         case "search_policy":
           return await this.searchPolicy(args);
+        case "outlook_list_mails":
+          return await this.outlookListMails(args, ctx);
+        case "outlook_get_mail":
+          return await this.outlookGetMail(args, ctx);
+        case "outlook_list_calendar":
+          return await this.outlookListCalendar(args, ctx);
+        case "propose_create_outlook_event":
+          return this.proposeCreateOutlookEvent(args);
+        case "propose_reply_outlook_mail":
+          return this.proposeReplyOutlookMail(args, ctx);
         case "jira_my_work_summary":
           return await this.jiraMyWorkSummary(args, ctx);
         case "jira_list_my_tasks":
@@ -125,9 +154,14 @@ export class ToolRunnerService {
       }
     } catch (e) {
       this.log.warn(`Tool ${name} failed: ${String(e)}`);
-      const error = name.includes("jira")
-        ? explainJiraError(e)
-        : explainHrError(e);
+      const error =
+        name.includes("jira")
+          ? explainJiraError(e)
+          : name.startsWith("outlook_")
+            ? e instanceof Error
+              ? e.message
+              : String(e)
+            : explainHrError(e);
       return { content: JSON.stringify({ ok: false, error, summary: error }), effects: {} };
     }
   }
@@ -137,9 +171,14 @@ export class ToolRunnerService {
     ctx: ToolRunContext,
   ): Promise<ToolRunResult> {
     const result = await this.jira.myWorkSummary(ctx.actor, jiraFilter(args));
+    const firstUrl = result.issues.find((i) => i.url)?.url;
     return {
       content: JSON.stringify({ ok: true, ...result, issues: result.issues.slice(0, 50) }),
-      effects: { preview: result.issues, citations: result.citations },
+      effects: {
+        preview: { issues: result.issues, stats: result.stats },
+        citations: result.citations,
+        uiAction: firstUrl ? jiraIssueAction(firstUrl, "Mở Jira") : null,
+      },
     };
   }
 
@@ -148,9 +187,14 @@ export class ToolRunnerService {
     ctx: ToolRunContext,
   ): Promise<ToolRunResult> {
     const result = await this.jira.listMyTasks(ctx.actor, jiraFilter(args));
+    const firstUrl = result.issues.find((i) => i.url)?.url;
     return {
       content: JSON.stringify({ ok: true, ...result, issues: result.issues.slice(0, 50) }),
-      effects: { preview: result.issues, citations: result.citations },
+      effects: {
+        preview: { issues: result.issues, stats: result.stats },
+        citations: result.citations,
+        uiAction: firstUrl ? jiraIssueAction(firstUrl, "Mở Jira") : null,
+      },
     };
   }
 
@@ -166,14 +210,20 @@ export class ToolRunnerService {
     });
     return {
       content: JSON.stringify({ ok: true, ...result, issues: result.issues.slice(0, 50) }),
-      effects: { preview: result.issues, citations: result.citations },
+      effects: {
+        preview: { issues: result.issues, stats: result.stats, priorityItems: result.priorityItems },
+        citations: result.citations,
+        uiAction: result.issues.find((i) => i.url)?.url
+          ? jiraIssueAction(result.issues.find((i) => i.url)!.url!, "Mở Jira")
+          : null,
+      },
     };
   }
 
   async executePending(
     actor: Actor,
     action: ChatConfirmAction,
-  ): Promise<{ reply: string; executed: unknown; slots: Slots }> {
+  ): Promise<{ reply: string; executed: unknown; slots: Slots; uiAction?: ChatUiAction | null }> {
     try {
       let executed: unknown;
       if (action.tool === "create_leave") {
@@ -181,6 +231,26 @@ export class ToolRunnerService {
           actor,
           action.args as { type: string; from: string; to: string; reason: string },
         );
+        if (executed == null) {
+          return {
+            reply: "Hệ thống không ghi nhận đơn nghỉ phép. Bạn thử xác nhận lại giúp mình.",
+            executed: null,
+            slots: emptySlots(),
+          };
+        }
+        const row = executed as LeaveRow;
+        const type = leaveTypeLabel(String(row.type ?? action.args.type ?? ""));
+        const when = formatVnDateRange(
+          String(row.from ?? action.args.from ?? ""),
+          String(row.to ?? action.args.to ?? ""),
+        );
+        const reason = String(row.reason ?? action.args.reason ?? "").trim();
+        return {
+          reply: `Mình đã gửi đơn ${type} của bạn cho ${when}${reason ? ` với lý do ${reason}` : ""}. Đơn đang chờ duyệt.`,
+          executed,
+          slots: emptySlots(),
+          uiAction: leaveResultsAction("Xem đơn nghỉ phép"),
+        };
       } else if (action.tool === "create_jira_task") {
         executed = await this.jira.createTask(
           actor,
@@ -191,12 +261,34 @@ export class ToolRunnerService {
           reply: `Đã tạo Jira ${created.key}: ${created.summary}.`,
           executed,
           slots: emptySlots(),
+          uiAction: created.url
+            ? jiraIssueAction(created.url, `Mở ${created.key} trên Jira`)
+            : null,
         };
       } else if (action.tool === "create_trip") {
         executed = await this.tools.createTrip(
           actor,
           action.args as { destination: string; from: string; to: string; purpose: string },
         );
+        if (executed == null) {
+          return {
+            reply: "Hệ thống không ghi nhận đơn công tác. Bạn thử xác nhận lại giúp mình.",
+            executed: null,
+            slots: emptySlots(),
+          };
+        }
+        const row = executed as TripRow;
+        const dest = String(row.destination ?? action.args.destination ?? "");
+        const when = formatVnDateRange(
+          String(row.from ?? action.args.from ?? ""),
+          String(row.to ?? action.args.to ?? ""),
+        );
+        return {
+          reply: `Mình đã gửi đơn công tác ${dest} của bạn cho ${when}. Đơn đang chờ duyệt.`,
+          executed,
+          slots: emptySlots(),
+          uiAction: tripResultsAction("Xem đơn công tác"),
+        };
       } else if (action.tool === "cancel_leave") {
         executed = await this.tools.cancelLeave(actor, String(action.args.id));
       } else if (action.tool === "update_leave") {
@@ -217,9 +309,10 @@ export class ToolRunnerService {
           ? formatLeaveList(items as LeaveRow[]).stats
           : `Đã phê duyệt ${count} đơn (ids: ${ids.join(", ")}).`;
         return {
-          reply: `${detail}\n\nĐã phê duyệt xong ${count} đơn. Bạn xem tab Kết quả để kiểm tra nhé.`,
+          reply: `${detail}\n\nĐã phê duyệt xong ${count} đơn.`,
           executed,
           slots: emptySlots(),
+          uiAction: leaveResultsAction(),
         };
       } else if (action.tool === "reject_leaves") {
         const ids = (action.args.ids as string[]) ?? [];
@@ -229,9 +322,10 @@ export class ToolRunnerService {
             ? Number((executed as { count: number }).count)
             : ids.length;
         return {
-          reply: `Đã từ chối ${count} đơn nghỉ phép. Bạn xem tab Kết quả để kiểm tra nhé.`,
+          reply: `Đã từ chối ${count} đơn nghỉ phép.`,
           executed,
           slots: emptySlots(),
+          uiAction: leaveResultsAction(),
         };
       } else if (action.tool === "approve_trips") {
         const ids = (action.args.ids as string[]) ?? [];
@@ -241,9 +335,10 @@ export class ToolRunnerService {
             ? Number((executed as { count: number }).count)
             : ids.length;
         return {
-          reply: `Đã phê duyệt ${count} đơn công tác. Bạn xem tab Kết quả để kiểm tra nhé.`,
+          reply: `Đã phê duyệt ${count} đơn công tác.`,
           executed,
           slots: emptySlots(),
+          uiAction: tripResultsAction(),
         };
       } else if (action.tool === "reject_trips") {
         const ids = (action.args.ids as string[]) ?? [];
@@ -253,9 +348,61 @@ export class ToolRunnerService {
             ? Number((executed as { count: number }).count)
             : ids.length;
         return {
-          reply: `Đã từ chối ${count} đơn công tác. Bạn xem tab Kết quả để kiểm tra nhé.`,
+          reply: `Đã từ chối ${count} đơn công tác.`,
           executed,
           slots: emptySlots(),
+          uiAction: tripResultsAction(),
+        };
+      } else if (action.tool === "create_outlook_event") {
+        const result = await this.tools.createOutlookEvent(
+          actor,
+          action.args as {
+            subject: string;
+            start: string;
+            end: string;
+            timeZone?: string;
+            isAllDay?: boolean;
+            location?: string;
+            body?: string;
+            attendees?: string[];
+          },
+        );
+        if (!result.connected || !result.event) {
+          return {
+            reply: result.error || "Không tạo được sự kiện Outlook.",
+            executed: null,
+            slots: emptySlots(),
+            uiAction: /kết nối|connect/i.test(result.error || "")
+              ? outlookConnectAction()
+              : null,
+          };
+        }
+        const ev = result.event;
+        return {
+          reply: `Đã tạo sự kiện Outlook “${ev.subject}” lúc ${formatVnDateTime(ev.start)} → ${formatVnDateTime(ev.end)}${ev.location ? ` tại ${ev.location}` : ""}.`,
+          executed: result,
+          slots: emptySlots(),
+          uiAction: outlookCalendarAction(ev.webLink, "Xem lịch Outlook"),
+        };
+      } else if (action.tool === "reply_outlook_mail") {
+        const messageId = String(action.args.messageId ?? "");
+        const comment = String(action.args.comment ?? "");
+        const result = await this.tools.replyOutlookMail(actor, messageId, comment);
+        if (!result.connected || !result.replied) {
+          return {
+            reply: result.error || "Không gửi được trả lời mail.",
+            executed: null,
+            slots: emptySlots(),
+            uiAction: /kết nối|connect/i.test(result.error || "")
+              ? outlookConnectAction()
+              : null,
+          };
+        }
+        return {
+          reply: `Đã gửi trả lời mail trên Outlook (${result.microsoftEmail ?? "hộp thư của bạn"}).`,
+          executed: result,
+          slots: emptySlots(),
+          uiAction: outlookMailAction(undefined, "Xem hộp thư Outlook"),
         };
       } else {
         return {
@@ -265,12 +412,20 @@ export class ToolRunnerService {
         };
       }
       return {
-        reply: `Xong rồi — ${action.summary}. Bạn xem tab Kết quả để kiểm tra nhé.`,
+        reply: `Xong rồi — ${action.summary}.`,
         executed,
         slots: emptySlots(),
+        uiAction: uiActionFromPendingTool(action.tool) ?? leaveResultsAction(),
       };
     } catch (e) {
-      const error = action.tool === "create_jira_task" ? explainJiraError(e) : explainHrError(e);
+      const error =
+        action.tool === "create_jira_task"
+          ? explainJiraError(e)
+          : action.tool === "create_outlook_event" || action.tool === "reply_outlook_mail"
+            ? e instanceof Error
+              ? e.message
+              : String(e)
+            : explainHrError(e);
       return { reply: error, executed: null, slots: emptySlots() };
     }
   }
@@ -287,7 +442,7 @@ export class ToolRunnerService {
       };
     }
     const exec = await this.executePending(ctx.actor, ctx.pending);
-    const ok = Boolean(exec.executed);
+    const ok = exec.executed != null;
     return {
       content: JSON.stringify({
         ok,
@@ -295,13 +450,17 @@ export class ToolRunnerService {
         mutated: ok,
         summary: exec.reply,
         result: exec.executed,
+        error: ok ? undefined : exec.reply,
       }),
       effects: {
-        confirm: null,
-        pending: null,
+        confirm: ok ? null : ctx.pending,
+        pending: ok ? null : ctx.pending,
         executed: exec.executed,
         mutated: ok,
         slots: exec.slots,
+        uiAction: ok
+          ? exec.uiAction ?? uiActionFromPendingTool(ctx.pending.tool)
+          : null,
       },
     };
   }
@@ -351,7 +510,10 @@ export class ToolRunnerService {
         sickRemaining: b.sickRemaining,
         summary: `Phép năm còn ${b.annualRemaining}/${b.annualTotal} ngày; phép ốm còn khung ${b.sickRemaining} ngày.`,
       }),
-      effects: { preview: b },
+      effects: {
+        preview: b,
+        uiAction: leaveResultsAction("Xem số dư / đơn nghỉ"),
+      },
     };
   }
 
@@ -364,23 +526,9 @@ export class ToolRunnerService {
     ]);
     const pendingLeaves = (leaves as LeaveRow[]).filter((r) => r.status === "PENDING");
     const pendingTrips = (trips as TripRow[]).filter((r) => r.status === "PENDING");
-    const leavePart = pendingLeaves.length
-      ? formatLeaveList(pendingLeaves, "nghỉ phép chờ duyệt").stats
-      : "Không có đơn nghỉ phép chờ duyệt.";
-    const tripPart = pendingTrips.length
-      ? formatTripList(pendingTrips, "công tác chờ duyệt").stats
-      : "Không có đơn công tác chờ duyệt.";
     const leaveIds = pendingLeaves.map((r) => String(r._id ?? r.id));
     const tripIds = pendingTrips.map((r) => String(r._id ?? r.id));
-    const summary = [
-      `Tổng chờ duyệt: ${pendingLeaves.length} nghỉ phép + ${pendingTrips.length} công tác.`,
-      "",
-      "— Nghỉ phép —",
-      leavePart,
-      "",
-      "— Công tác —",
-      tripPart,
-    ].join("\n");
+    const summary = `Tổng chờ duyệt: ${pendingLeaves.length} nghỉ phép + ${pendingTrips.length} công tác. Chi tiết đơn đã hiện trên thẻ.`;
     return {
       content: JSON.stringify({
         ok: true,
@@ -401,6 +549,10 @@ export class ToolRunnerService {
           ...ctx.slots,
           listedIds: [...leaveIds, ...tripIds].join(","),
         },
+        uiAction:
+          pendingLeaves.length || !pendingTrips.length
+            ? leaveResultsAction("Xem đơn nghỉ phép")
+            : tripResultsAction("Xem đơn công tác"),
       },
     };
   }
@@ -458,11 +610,12 @@ export class ToolRunnerService {
         hint:
           ctx.actor.role === "MANAGER"
             ? "Muốn duyệt thì gọi propose_approve_leaves với ids hoặc bộ lọc phù hợp."
-            : "Chi tiết xem thêm ở tab Kết quả.",
+            : "UI sẽ hiện nút xem Kết quả — không nhắc tab trong câu trả lời.",
       }),
       effects: {
         preview: matched,
         slots: { ...ctx.slots, listedIds: ids.join(",") },
+        uiAction: leaveResultsAction("Xem đơn nghỉ phép"),
       },
     };
   }
@@ -524,11 +677,12 @@ export class ToolRunnerService {
         hint:
           ctx.actor.role === "MANAGER" && pending.length
             ? "Muốn duyệt công tác thì gọi propose_approve_trips với ids hoặc approveAll."
-            : "Chi tiết xem thêm ở tab Kết quả.",
+            : "UI sẽ hiện nút xem Kết quả — không nhắc tab trong câu trả lời.",
       }),
       effects: {
         preview: matched,
         slots: { ...ctx.slots, listedIds: ids.join(",") },
+        uiAction: tripResultsAction("Xem đơn công tác"),
       },
     };
   }
@@ -551,7 +705,16 @@ export class ToolRunnerService {
           summary: body,
           citations,
         }),
-        effects: { citations },
+        effects: {
+          preview: {
+            policyChunks: chunks.map((c) => ({
+              title: c.title,
+              text: c.text,
+              source: c.source,
+            })),
+          },
+          citations,
+        },
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -565,6 +728,371 @@ export class ToolRunnerService {
         effects: {},
       };
     }
+  }
+
+  private async outlookListMails(
+    args: Record<string, unknown>,
+    ctx: ToolRunContext,
+  ): Promise<ToolRunResult> {
+    const from =
+      normalizeVnDate(String(args.from ?? ""), { rollPastToNextYear: false }) ??
+      (String(args.from ?? "").trim() || undefined);
+    const toRaw =
+      normalizeVnDate(String(args.to ?? ""), { rollPastToNextYear: false }) ??
+      (String(args.to ?? "").trim() || undefined);
+    const to = toRaw || from;
+    const hasRange = Boolean(from && to);
+
+    const unreadOnly =
+      typeof args.unreadOnly === "boolean"
+        ? args.unreadOnly
+        : String(args.unreadOnly ?? "").toLowerCase() === "true";
+
+    const top = args.top != null ? Number(args.top) : hasRange ? 30 : 15;
+    const search = String(args.search ?? "").trim() || undefined;
+    const result = await this.tools.listOutlookMails(ctx.actor, {
+      unreadOnly,
+      top: Number.isFinite(top) ? top : 15,
+      search,
+      from,
+      to,
+    });
+    if (!result.connected) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needConnect: true,
+          error:
+            result.error ||
+            "Chưa kết nối Outlook. Nhờ user bấm “Kết nối Outlook” trên thanh trên (cấp quyền Mail.ReadWrite + Calendars.ReadWrite).",
+        }),
+        effects: { uiAction: outlookConnectAction() },
+      };
+    }
+    const mails = result.mails ?? [];
+    const unread = mails.filter((m) => !m.isRead).length;
+    const rangeBit =
+      hasRange && from && to
+        ? from === to
+          ? ` ngày ${formatVnDate(from)}`
+          : ` từ ${formatVnDateRange(from, to)}`
+        : "";
+    const unreadBit = unreadOnly ? " chưa đọc" : "";
+    const searchBit = search ? ` khớp “${search}”` : "";
+    const summary = mails.length
+      ? `Có ${mails.length} mail${unreadBit}${rangeBit}${searchBit} trên ${result.microsoftEmail ?? "Outlook"}${
+          unread && !unreadOnly ? `, ${unread} chưa đọc` : ""
+        }. Danh sách đã hiện trên thẻ.`
+      : `Không có mail${unreadBit}${rangeBit}${searchBit} trên ${result.microsoftEmail ?? "Outlook"}.`;
+    const listedMailIds = mails.map((m) => m.id).join("\n");
+    return {
+      content: JSON.stringify({
+        ok: true,
+        count: mails.length,
+        unreadOnly,
+        from: from ?? null,
+        to: to ?? null,
+        ids: mails.map((m) => m.id),
+        summary,
+        hint:
+          "Khi trả lời user: giữ đúng giờ VN (+7). Không liệt kê từng mail — UI tự vẽ thẻ từ kết quả API. Tóm tắt sâu → outlook_get_mail(ordinal=\"1\").",
+      }),
+      effects: {
+        preview: mails,
+        slots: { ...ctx.slots, listedMailIds: listedMailIds || null },
+        uiAction: outlookMailAction(undefined, "Mở Outlook Mail"),
+      },
+    };
+  }
+
+  private async outlookGetMail(
+    args: Record<string, unknown>,
+    ctx: ToolRunContext,
+  ): Promise<ToolRunResult> {
+    const ordinalRaw = String(args.ordinal ?? "").trim();
+    let messageId = String(args.messageId ?? "").trim();
+
+    if (ordinalRaw || !messageId) {
+      const listed = (ctx.slots.listedMailIds ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!listed.length && !messageId) {
+        return {
+          content: JSON.stringify({
+            ok: false,
+            needMore: true,
+            error:
+              "Chưa có danh sách mail trong phiên. Gọi outlook_list_mails trước, rồi outlook_get_mail(ordinal=\"1\").",
+          }),
+          effects: {},
+        };
+      }
+      if (listed.length) {
+        const ord = ordinalRaw || "1";
+        const picked = pickByOrdinal(listed, ord);
+        if (!picked.length) {
+          return {
+            content: JSON.stringify({
+              ok: false,
+              needMore: true,
+              error: `Không có mail thứ ${ord} trong ${listed.length} mail vừa liệt kê.`,
+            }),
+            effects: {},
+          };
+        }
+        messageId = picked[0];
+      }
+    }
+
+    if (!messageId) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Thiếu ordinal hoặc messageId.",
+        }),
+        effects: {},
+      };
+    }
+
+    const result = await this.tools.getOutlookMail(ctx.actor, messageId);
+    if (!result.connected || !result.mail) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needConnect: !result.connected,
+          error: result.error || "Không đọc được mail.",
+        }),
+        effects: {},
+      };
+    }
+    const m = result.mail;
+    const summary = [
+      `Mail: ${m.subject}`,
+      `Từ: ${m.from}`,
+      `Nhận: ${formatVnDateTime(m.receivedAt)}`,
+      `Trạng thái: ${m.isRead ? "đã đọc" : "chưa đọc"}`,
+      "",
+      "Nội dung (rút gọn):",
+      (m.body || m.preview || "").trim() || "(trống)",
+    ].join("\n");
+    return {
+      content: JSON.stringify({
+        ok: true,
+        summary,
+        hint:
+          "Tóm tắt ngắn bằng tiếng Việt. Nếu cùng lượt có nhiều mail khác, phải tóm tắt đủ từng mail, không gom thành một. Ngày giờ dd/mm/yyyy giờ VN (+7). Không bịa nội dung.",
+      }),
+      effects: {
+        preview: m,
+        uiAction: outlookMailAction(undefined, "Mở Outlook Mail"),
+      },
+    };
+  }
+
+  private async outlookListCalendar(
+    args: Record<string, unknown>,
+    ctx: ToolRunContext,
+  ): Promise<ToolRunResult> {
+    let from =
+      normalizeVnDate(String(args.from ?? ""), { rollPastToNextYear: false }) ??
+      String(args.from ?? "").trim();
+    let to =
+      normalizeVnDate(String(args.to ?? ""), { rollPastToNextYear: false }) ??
+      String(args.to ?? "").trim();
+    if (from && !to) to = from;
+    if (to && !from) from = to;
+    if (!from || !to) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Thiếu from/to (YYYY-MM-DD). Hôm nay thì from=to=ngày hôm nay.",
+        }),
+        effects: {},
+      };
+    }
+    const result = await this.tools.listOutlookCalendar(ctx.actor, from, to);
+    if (!result.connected) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needConnect: true,
+          error:
+            result.error ||
+            "Chưa kết nối Outlook. Nhờ user bấm “Kết nối Outlook” trên thanh trên.",
+        }),
+        effects: { uiAction: outlookConnectAction() },
+      };
+    }
+    const events = result.events ?? [];
+    const range = formatVnDateRange(from, to);
+    const factLines = events.slice(0, 8).map((e) => {
+      const when = e.isAllDay
+        ? `${formatVnDate(String(e.start).slice(0, 10))} (cả ngày)`
+        : `${formatVnDateTime(e.start)} → ${formatVnDateTime(e.end)}`;
+      const loc = (e.location ?? "").trim();
+      return loc
+        ? `- ${e.subject}: ${when}; địa điểm: ${loc}`
+        : `- ${e.subject}: ${when}; không có địa điểm trên lịch`;
+    });
+    const summary = events.length
+      ? `Lịch Outlook ${range}: ${events.length} sự kiện. Chi tiết đã hiện trên thẻ.\nChỉ dùng đúng các dòng sau. CẤM thêm phòng họp/địa điểm không có trong dòng:\n${factLines.join("\n")}`
+      : `Lịch Outlook ${range}: không có sự kiện.`;
+    return {
+      content: JSON.stringify({
+        ok: true,
+        count: events.length,
+        from,
+        to,
+        summary,
+        hint: "Trả lời đúng sự kiện trong summary. Không bịa địa điểm/phòng họp. Ngày giờ dd/mm/yyyy giờ VN (+7).",
+      }),
+      effects: {
+        preview: events,
+        uiAction: outlookCalendarAction(undefined, "Mở lịch Outlook"),
+      },
+    };
+  }
+
+  private proposeCreateOutlookEvent(args: Record<string, unknown>): ToolRunResult {
+    const subject = String(args.subject ?? "").trim();
+    const startLocal = parseVnDateTimeLocal(String(args.start ?? ""));
+    let endLocal = parseVnDateTimeLocal(String(args.end ?? ""));
+    const location = String(args.location ?? "").trim();
+    const body = String(args.body ?? "").trim();
+    const isAllDay = Boolean(args.isAllDay);
+    const attendees = Array.isArray(args.attendees)
+      ? args.attendees.map(String).map((s) => s.trim()).filter(Boolean)
+      : [];
+
+    if (!subject || subject.length < 2) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Thiếu tiêu đề sự kiện. Hỏi user muốn đặt tên gì.",
+        }),
+        effects: {},
+      };
+    }
+    if (!startLocal) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error:
+            "Thiếu hoặc sai giờ bắt đầu. Ví dụ: 2026-09-17T14:00 hoặc 17/09/2026 14:00 (giờ VN).",
+        }),
+        effects: {},
+      };
+    }
+    if (!endLocal) {
+      endLocal = addMinutesLocal(startLocal, isAllDay ? 24 * 60 : 60);
+    }
+    if (!endLocal || endLocal <= startLocal) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Giờ kết thúc phải sau giờ bắt đầu.",
+        }),
+        effects: {},
+      };
+    }
+
+    const action: ChatConfirmAction = {
+      tool: "create_outlook_event",
+      args: {
+        subject,
+        start: startLocal,
+        end: endLocal,
+        timeZone: "Asia/Ho_Chi_Minh",
+        isAllDay,
+        ...(location ? { location } : {}),
+        ...(body ? { body } : {}),
+        ...(attendees.length ? { attendees } : {}),
+      },
+      summary: `Tạo sự kiện Outlook “${subject}” ${formatVnDateTime(startLocal)} → ${formatVnDateTime(endLocal)}${location ? ` tại ${location}` : ""}${attendees.length ? ` (mời ${attendees.join(", ")})` : ""}`,
+    };
+    return {
+      content: JSON.stringify({
+        ok: true,
+        needsConfirm: true,
+        summary: action.summary,
+        askUser: `${action.summary}.\n\nBạn xác nhận để mình tạo trên lịch Outlook nhé?`,
+      }),
+      effects: { confirm: action, pending: action },
+    };
+  }
+
+  private proposeReplyOutlookMail(
+    args: Record<string, unknown>,
+    ctx: ToolRunContext,
+  ): ToolRunResult {
+    const comment = String(args.comment ?? "").trim();
+    const ordinalRaw = String(args.ordinal ?? "").trim();
+    let messageId = String(args.messageId ?? "").trim();
+
+    if (!comment || comment.length < 2) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          needMore: true,
+          error: "Thiếu nội dung trả lời. Hỏi user muốn viết gì.",
+        }),
+        effects: {},
+      };
+    }
+
+    if (!messageId) {
+      const listed = (ctx.slots.listedMailIds ?? "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!listed.length) {
+        return {
+          content: JSON.stringify({
+            ok: false,
+            needMore: true,
+            error:
+              "Chưa có danh sách mail. Gọi outlook_list_mails trước, rồi propose_reply_outlook_mail(ordinal=\"1\", comment=...).",
+          }),
+          effects: {},
+        };
+      }
+      const ord = ordinalRaw || "1";
+      const picked = pickByOrdinal(listed, ord);
+      if (!picked.length) {
+        return {
+          content: JSON.stringify({
+            ok: false,
+            needMore: true,
+            error: `Không có mail thứ ${ord} trong ${listed.length} mail vừa liệt kê.`,
+          }),
+          effects: {},
+        };
+      }
+      messageId = picked[0];
+    }
+
+    const preview =
+      comment.length > 160 ? `${comment.slice(0, 160)}…` : comment;
+    const action: ChatConfirmAction = {
+      tool: "reply_outlook_mail",
+      args: { messageId, comment },
+      summary: `Trả lời mail Outlook (thứ ${ordinalRaw || "đã chọn"}): “${preview}”`,
+    };
+    return {
+      content: JSON.stringify({
+        ok: true,
+        needsConfirm: true,
+        summary: action.summary,
+        askUser: `${action.summary}.\n\nBạn xác nhận để mình gửi trả lời nhé?`,
+      }),
+      effects: { confirm: action, pending: action },
+    };
   }
 
   private async proposeCreateLeave(
@@ -608,10 +1136,9 @@ export class ToolRunnerService {
           ok: false,
           policyBlocked: true,
           reasons: verdict.reasons,
-          citations: verdict.citations,
           summary: `Không thể tạo đơn vì trái quy định:\n- ${verdict.reasons.join("\n- ")}`,
         }),
-        effects: { citations: verdict.citations, confirm: null, pending: null },
+        effects: { confirm: null, pending: null },
       };
     }
     const action: ChatConfirmAction = {
@@ -619,17 +1146,18 @@ export class ToolRunnerService {
       args: { type, from, to, reason },
       summary: `Tạo nghỉ phép ${leaveTypeLabel(type)} từ ${from} đến ${to} (lý do: ${reason})`,
     };
+    const calendarNote = await this.calendarNote(ctx.actor, from, to);
     return {
       content: JSON.stringify({
         ok: true,
         needsConfirm: true,
         summary: action.summary,
-        askUser: `${action.summary}. Bạn xác nhận để mình gửi đơn nhé?`,
+        calendarWarning: calendarNote.trim() || null,
+        askUser: `${action.summary}.${calendarNote}\n\nBạn xác nhận để mình gửi đơn nhé?`,
       }),
       effects: {
         confirm: action,
         pending: action,
-        citations: verdict.citations,
         slots: {
           ...ctx.slots,
           leaveType: type,
@@ -738,10 +1266,10 @@ export class ToolRunnerService {
     };
   }
 
-  private proposeCreateTrip(
+  private async proposeCreateTrip(
     args: Record<string, unknown>,
     ctx: ToolRunContext,
-  ): ToolRunResult {
+  ): Promise<ToolRunResult> {
     const destination = String(args.destination ?? "").trim();
     const from = normalizeVnDate(String(args.from ?? ""), { rollPastToNextYear: true }) ?? String(args.from ?? "");
     const to = normalizeVnDate(String(args.to ?? ""), { rollPastToNextYear: true }) ?? String(args.to ?? "");
@@ -763,10 +1291,9 @@ export class ToolRunnerService {
           ok: false,
           policyBlocked: true,
           reasons: verdict.reasons,
-          citations: verdict.citations,
           summary: `Không thể tạo công tác:\n- ${verdict.reasons.join("\n- ")}`,
         }),
-        effects: { citations: verdict.citations, confirm: null, pending: null },
+        effects: { confirm: null, pending: null },
       };
     }
     const action: ChatConfirmAction = {
@@ -774,17 +1301,18 @@ export class ToolRunnerService {
       args: { destination, from, to, purpose },
       summary: `Tạo công tác ${destination} từ ${from} đến ${to}`,
     };
+    const calendarNote = await this.calendarNote(ctx.actor, from, to);
     return {
       content: JSON.stringify({
         ok: true,
         needsConfirm: true,
         summary: action.summary,
-        askUser: `${action.summary}. Bạn xác nhận để mình gửi đơn nhé?`,
+        calendarWarning: calendarNote.trim() || null,
+        askUser: `${action.summary}.${calendarNote}\n\nBạn xác nhận để mình gửi đơn nhé?`,
       }),
       effects: {
         confirm: action,
         pending: action,
-        citations: verdict.citations,
         slots: { ...ctx.slots, destination, from, to, purpose },
       },
     };
@@ -1164,6 +1692,16 @@ export class ToolRunnerService {
         slots: { ...ctx.slots, listedIds: ids.join(",") },
       },
     };
+  }
+
+  private async calendarNote(actor: Actor, from: string, to: string) {
+    try {
+      const result = await this.tools.calendarConflicts(actor, from, to);
+      return formatCalendarWarning(result);
+    } catch (e) {
+      this.log.warn(`calendarConflicts: ${String(e)}`);
+      return "\n\n(Không kiểm tra được lịch Outlook lúc này — bạn vẫn có thể gửi đơn.)";
+    }
   }
 }
 

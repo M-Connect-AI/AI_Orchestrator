@@ -1,19 +1,29 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ChatBlock,
   ChatDone,
+  ChatHighlight,
+  ChatSuggestion,
+  ChatUiAction,
   getThread,
   listThreads,
+  outlookAuthUrl,
   Session,
   streamChat,
   ThreadSummary,
 } from "../api";
+import { ChatBlocks, HighlightedText } from "../chat/ChatRich";
 
 type Bubble = {
   role: "user" | "assistant";
   content: string;
   confirm?: ChatDone["confirm"];
+  uiAction?: ChatUiAction | null;
+  blocks?: ChatBlock[];
+  highlights?: ChatHighlight[];
+  suggestions?: ChatSuggestion[];
   thinking?: boolean;
 };
 
@@ -40,6 +50,15 @@ function greeting(isManager: boolean): Bubble {
     content: isManager
       ? "Xin chào quản lý. Mình hỗ trợ nghiệp vụ nhân sự, thống kê task Jira và phân tích backlog project. Bạn muốn làm gì?"
       : "Xin chào. Mình hỗ trợ nghiệp vụ nhân sự, thống kê task Jira và phân tích backlog của bạn. Bạn muốn làm gì?",
+    suggestions: isManager
+      ? [
+          { label: "Đơn phép team đang chờ duyệt", text: "Đơn phép team đang chờ duyệt" },
+          { label: "Phân tích backlog Jira của tôi", text: "Phân tích backlog Jira của tôi" },
+        ]
+      : [
+          { label: "Tôi còn bao nhiêu ngày phép?", text: "Tôi còn bao nhiêu ngày phép?" },
+          { label: "Thống kê task Jira của tôi", text: "Thống kê task Jira của tôi" },
+        ],
   };
 }
 
@@ -49,6 +68,7 @@ function threadStorageKey(employeeCode: string) {
 
 export function ChatPage() {
   const session = useOutletContext<Session>();
+  const nav = useNavigate();
   const isManager = session.user.role === "MANAGER";
   const hints = isManager ? MANAGER_HINTS : STAFF_HINTS;
   const queryClient = useQueryClient();
@@ -97,13 +117,24 @@ export function ChatPage() {
   }
 
   function bubblesFromThread(
-    rows: { role: "user" | "assistant"; content: string }[],
+    rows: {
+      role: "user" | "assistant";
+      content: string;
+      blocks?: ChatBlock[];
+      highlights?: ChatHighlight[];
+      uiAction?: ChatUiAction | null;
+      suggestions?: ChatSuggestion[];
+    }[],
     pending: ChatDone["confirm"],
   ): Bubble[] {
     if (!rows.length) return [greeting(isManager)];
     return rows.map((m, i) => ({
       role: m.role,
       content: m.content,
+      blocks: m.blocks,
+      highlights: m.highlights,
+      uiAction: m.uiAction,
+      suggestions: m.suggestions,
       confirm: i === rows.length - 1 && m.role === "assistant" ? pending : undefined,
     }));
   }
@@ -179,7 +210,11 @@ export function ChatPage() {
       rememberThread(result.threadId);
       patchLastAssistant({
         content: result.reply || undefined,
-        confirm: result.confirm || undefined,
+        confirm: result.confirm ?? null,
+        uiAction: result.uiAction ?? null,
+        blocks: result.blocks ?? [],
+        highlights: result.highlights ?? [],
+        suggestions: result.suggestions ?? [],
         thinking: false,
       });
       setThreads((prev) => {
@@ -215,6 +250,30 @@ export function ChatPage() {
     void run(text);
   }
 
+  async function handleUiAction(action: ChatUiAction) {
+    if (action.key === "NONE") return;
+    if (action.key === "LEAVE_RESULTS") {
+      nav(action.path || "/leaves");
+      return;
+    }
+    if (action.key === "TRIP_RESULTS") {
+      nav(action.path || "/trips");
+      return;
+    }
+    if (action.key === "OUTLOOK_CONNECT") {
+      try {
+        const { url } = await outlookAuthUrl(session.accessToken);
+        window.location.href = url;
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : "Không mở được kết nối Outlook.");
+      }
+      return;
+    }
+    if (action.url) {
+      window.open(action.url, "_blank", "noopener,noreferrer");
+    }
+  }
+
   return (
     <div className="flex h-[calc(100vh-56px)]">
       <aside className="w-64 shrink-0 border-r border-msb-mist bg-white flex flex-col">
@@ -223,7 +282,7 @@ export function ChatPage() {
             type="button"
             disabled={busy}
             onClick={startNewChat}
-            className="w-full text-sm bg-msb-orange hover:bg-msb-orange-dark text-white rounded-lg py-2 disabled:opacity-50"
+            className="w-full text-sm bg-msb-orange hover:bg-msb-orange-dark text-white rounded-full py-2.5 font-medium disabled:opacity-50"
           >
             Cuộc hội thoại mới
           </button>
@@ -245,7 +304,7 @@ export function ChatPage() {
                   type="button"
                   disabled={busy || opening}
                   onClick={() => void openThread(t.threadId)}
-                  className={`w-full text-left rounded-lg px-2.5 py-2 text-xs disabled:opacity-50 ${
+                  className={`w-full text-left rounded-2xl px-2.5 py-2 text-xs disabled:opacity-50 ${
                     active
                       ? "bg-msb-mist text-msb-ink"
                       : "hover:bg-msb-cream text-stone-600"
@@ -263,12 +322,12 @@ export function ChatPage() {
         </div>
       </aside>
       <div className="flex-1 max-w-3xl mx-auto flex flex-col p-4 min-w-0">
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-nowrap sm:flex-wrap gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1">
           {hints.map((h) => (
             <button
               key={h}
               type="button"
-              className="text-xs bg-white border border-msb-mist rounded-full px-3 py-1 text-stone-600 hover:border-msb-orange hover:text-msb-orange disabled:opacity-50"
+              className="shrink-0 text-xs bg-white border border-msb-mist rounded-full px-3 py-1.5 text-msb-orange hover:border-msb-orange hover:bg-msb-cream disabled:opacity-50"
               onClick={() => void run(h)}
               disabled={busy}
             >
@@ -283,20 +342,36 @@ export function ChatPage() {
             messages.map((m, i) => (
               <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div
-                  className={`max-w-[80%] rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
+                  className={`max-w-[86%] rounded-[20px] px-4 py-3 text-sm ${
                     m.role === "user"
-                      ? "bg-msb-orange text-white"
-                      : "bg-white border border-msb-mist"
+                      ? "bg-msb-orange text-white rounded-br-md"
+                      : "bg-white border border-msb-mist shadow-sm rounded-bl-md text-msb-ink min-w-0"
                   }`}
                 >
                   {m.thinking ? (
                     <Thinking />
                   ) : (
                     <>
-                      {m.content}
+                      <div className="whitespace-pre-wrap">
+                        <HighlightedText text={m.content} highlights={m.role === "assistant" ? m.highlights : undefined} />
+                      </div>
+                      {m.role === "assistant" && m.blocks?.length ? (
+                        <ChatBlocks
+                          blocks={m.blocks}
+                          onAction={(url) => window.open(url, "_blank", "noopener,noreferrer")}
+                        />
+                      ) : null}
+                      <FollowRow
+                        action={m.uiAction}
+                        suggestions={m.suggestions}
+                        hideChips={Boolean(m.confirm)}
+                        busy={busy}
+                        onAction={(a) => void handleUiAction(a)}
+                        onSuggest={(text) => void run(text)}
+                      />
                       {m.confirm ? (
-                        <div className="mt-3 pt-3 border-t border-msb-mist">
-                          <p className="text-xs text-stone-500 mb-2">
+                        <div className="mt-3 rounded-2xl bg-msb-cream border border-msb-mist p-3">
+                          <p className="text-xs text-stone-500 mb-1">
                             {m.confirm.tool === "approve_leaves" ||
                             m.confirm.tool === "reject_leaves" ||
                             m.confirm.tool === "approve_trips" ||
@@ -304,10 +379,13 @@ export function ChatPage() {
                               ? "Chỉ áp dụng các đơn đã thống kê ở trên"
                               : "Thao tác ghi — cần xác nhận trước khi gửi hệ thống"}
                           </p>
+                          {m.confirm.summary ? (
+                            <p className="text-sm text-msb-ink mb-3 leading-snug">{m.confirm.summary}</p>
+                          ) : null}
                           <button
                             type="button"
                             disabled={busy}
-                            className="bg-msb-orange hover:bg-msb-orange-dark text-white text-xs px-3 py-1.5 rounded-lg"
+                            className="w-full bg-msb-orange hover:bg-msb-orange-dark text-white text-sm font-medium px-3 py-2 rounded-full"
                             onClick={() => void run("đồng ý", true)}
                           >
                             {m.confirm.tool === "approve_leaves" || m.confirm.tool === "approve_trips"
@@ -316,7 +394,7 @@ export function ChatPage() {
                                 ? `Xác nhận từ chối ${Array.isArray(m.confirm.args.ids) ? m.confirm.args.ids.length : ""} đơn`
                                 : m.confirm.tool === "create_jira_task"
                                   ? "Xác nhận tạo Jira task"
-                                : "Xác nhận gửi"}
+                                  : "Xác nhận gửi"}
                           </button>
                         </div>
                       ) : null}
@@ -330,20 +408,65 @@ export function ChatPage() {
         </div>
         <form onSubmit={onSubmit} className="flex gap-2">
           <input
-            className="flex-1 border border-msb-mist rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-msb-orange"
+            className="flex-1 border border-msb-mist rounded-full px-4 py-2.5 bg-white focus:outline-none focus:border-msb-orange"
             placeholder={busy ? "Đang xử lý..." : "Nhập yêu cầu nhân sự..."}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={busy}
           />
           <button
-            className="bg-msb-orange hover:bg-msb-orange-dark text-white px-4 rounded-lg disabled:opacity-50 min-w-[72px]"
+            className="bg-msb-orange hover:bg-msb-orange-dark text-white px-5 rounded-full disabled:opacity-50 min-w-[72px] font-medium"
             disabled={busy}
           >
             {busy ? "..." : "Gửi"}
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+function FollowRow({
+  action,
+  suggestions,
+  hideChips,
+  busy,
+  onAction,
+  onSuggest,
+}: {
+  action?: ChatUiAction | null;
+  suggestions?: ChatSuggestion[];
+  hideChips?: boolean;
+  busy: boolean;
+  onAction: (action: ChatUiAction) => void;
+  onSuggest: (text: string) => void;
+}) {
+  const btn = action && action.key !== "NONE" ? action : null;
+  const chips = hideChips ? [] : suggestions ?? [];
+  if (!btn && !chips.length) return null;
+  return (
+    <div className="mt-3 pt-3 border-t border-msb-mist flex flex-wrap gap-2">
+      {btn ? (
+        <button
+          type="button"
+          disabled={busy}
+          className="bg-white border border-msb-orange text-msb-orange hover:bg-msb-cream text-xs px-3 py-1.5 rounded-full font-medium"
+          onClick={() => onAction(btn)}
+        >
+          {btn.label}
+        </button>
+      ) : null}
+      {chips.map((s) => (
+        <button
+          key={s.text}
+          type="button"
+          disabled={busy}
+          className="bg-msb-cream border border-msb-mist text-msb-ink hover:border-msb-orange hover:text-msb-orange text-xs px-3 py-1.5 rounded-full font-medium"
+          onClick={() => onSuggest(s.label)}
+          >
+            {s.label}
+        </button>
+      ))}
     </div>
   );
 }

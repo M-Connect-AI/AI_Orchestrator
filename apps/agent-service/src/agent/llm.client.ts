@@ -30,6 +30,9 @@ export type ChatWithToolsResult = {
   raw: ChatMessage;
 };
 
+const RATE_LIMIT_RETRIES = 4;
+const RATE_LIMIT_BASE_MS = 1200;
+
 @Injectable()
 export class LlmClient {
   constructor(private readonly config: ConfigService) {}
@@ -49,13 +52,10 @@ export class LlmClient {
     opts: { temperature?: number; max_tokens?: number } = {},
   ) {
     const { apiKey, baseURL, model } = this.credentials();
-    const res = await fetch(`${baseURL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const text = await this.postChatCompletions(
+      `${baseURL}/chat/completions`,
+      apiKey,
+      {
         model,
         messages,
         max_tokens: opts.max_tokens ?? 512,
@@ -63,12 +63,8 @@ export class LlmClient {
         top_p: 0.9,
         enable_thinking: false,
         chat_template_kwargs: { enable_thinking: false },
-      }),
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(greenNodeMessage(text, res.status));
-    }
+      },
+    );
     const data = JSON.parse(text) as {
       choices?: Array<{ message?: { content?: unknown } }>;
     };
@@ -81,13 +77,10 @@ export class LlmClient {
     opts: { temperature?: number; max_tokens?: number; tool_choice?: "auto" | "none" } = {},
   ): Promise<ChatWithToolsResult> {
     const { apiKey, baseURL, model } = this.credentials();
-    const res = await fetch(`${baseURL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const text = await this.postChatCompletions(
+      `${baseURL}/chat/completions`,
+      apiKey,
+      {
         model,
         messages,
         tools,
@@ -97,12 +90,8 @@ export class LlmClient {
         top_p: 0.9,
         enable_thinking: false,
         chat_template_kwargs: { enable_thinking: false },
-      }),
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(greenNodeMessage(text, res.status));
-    }
+      },
+    );
     const data = JSON.parse(text) as {
       choices?: Array<{
         message?: {
@@ -143,27 +132,26 @@ export class LlmClient {
     opts: { temperature?: number; max_tokens?: number } = {},
   ): AsyncGenerator<string> {
     const { apiKey, baseURL, model } = this.credentials();
-    const res = await fetch(`${baseURL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    const res = await this.fetchWithRateLimitRetry(
+      `${baseURL}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: opts.max_tokens ?? 512,
+          temperature: opts.temperature ?? 0,
+          top_p: 0.9,
+          stream: true,
+          enable_thinking: false,
+          chat_template_kwargs: { enable_thinking: false },
+        }),
       },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: opts.max_tokens ?? 512,
-        temperature: opts.temperature ?? 0,
-        top_p: 0.9,
-        stream: true,
-        enable_thinking: false,
-        chat_template_kwargs: { enable_thinking: false },
-      }),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(greenNodeMessage(text, res.status));
-    }
+    );
     if (!res.body) throw new Error("LLM không trả stream");
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -194,10 +182,82 @@ export class LlmClient {
       if (done) break;
     }
   }
+
+  private async postChatCompletions(
+    url: string,
+    apiKey: string,
+    body: Record<string, unknown>,
+  ): Promise<string> {
+    const res = await this.fetchWithRateLimitRetry(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    return res.text();
+  }
+
+  private async fetchWithRateLimitRetry(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES; attempt++) {
+      const res = await fetch(url, init);
+      if (res.ok) return res;
+
+      const text = await res.text();
+      const message = greenNodeMessage(text, res.status);
+      const rateLimited = isRateLimitStatus(res.status, message);
+      if (!rateLimited) throw new Error(message);
+      lastErr = new LlmRateLimitError(message);
+      if (attempt === RATE_LIMIT_RETRIES) break;
+
+      const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+      const backoff =
+        retryAfterMs ??
+        RATE_LIMIT_BASE_MS * 2 ** attempt + Math.floor(Math.random() * 400);
+      await sleep(Math.min(backoff, 20_000));
+    }
+    throw lastErr ?? new LlmRateLimitError("API rate limit exceeded");
+  }
+}
+
+export class LlmRateLimitError extends Error {
+  readonly rateLimited = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmRateLimitError";
+  }
+}
+
+export function isRateLimitError(err: unknown): boolean {
+  if (err instanceof LlmRateLimitError) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /rate limit|too many requests|quota|429/i.test(msg);
 }
 
 export function stripThink(raw: string) {
   return raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+function isRateLimitStatus(status: number, message: string) {
+  return status === 429 || /rate limit|too many requests|quota/i.test(message);
+}
+
+function parseRetryAfterMs(raw: string | null): number | null {
+  if (!raw?.trim()) return null;
+  const sec = Number(raw);
+  if (Number.isFinite(sec) && sec >= 0) return Math.ceil(sec * 1000);
+  const when = Date.parse(raw);
+  if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  return null;
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function greenNodeMessage(body: string, status: number) {

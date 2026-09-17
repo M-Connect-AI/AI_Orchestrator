@@ -14,17 +14,6 @@ type LeaveRow = {
   status: string;
 };
 
-type TripRow = {
-  _id: string;
-  employeeCode: string;
-  employeeName?: string;
-  destination: string;
-  from: string;
-  to: string;
-  purpose: string;
-  status: string;
-};
-
 type Balance = {
   employeeCode: string;
   annualRemaining: number;
@@ -32,7 +21,7 @@ type Balance = {
   sickRemaining: number;
 };
 
-export function ResultsPage() {
+export function LeavesPage() {
   const session = useOutletContext<Session>();
   const token = session.accessToken;
   const scope = session.user.role === "STAFF" ? "me" : "team";
@@ -40,11 +29,6 @@ export function ResultsPage() {
   const leaves = useQuery({
     queryKey: ["leaves", scope],
     queryFn: () => hrFetch<LeaveRow[]>(`/leaves?scope=${scope}`, token),
-    refetchOnMount: "always",
-  });
-  const trips = useQuery({
-    queryKey: ["trips", scope],
-    queryFn: () => hrFetch<TripRow[]>(`/trips?scope=${scope}`, token),
     refetchOnMount: "always",
   });
   const balance = useQuery({
@@ -86,31 +70,13 @@ export function ResultsPage() {
           ])}
         />
       </section>
-
-      <section>
-        <h2 className="text-lg font-semibold text-msb-ink">
-          Công tác ({scope === "team" ? "team + của bạn" : scope})
-        </h2>
-        <Table
-          headers={["Nhân viên", "Mã NV", "Địa điểm", "Từ", "Đến", "Mục đích", "Trạng thái"]}
-          rows={(trips.data ?? []).map((r) => [
-            r.employeeName ?? r.employeeCode,
-            r.employeeCode,
-            r.destination,
-            r.from,
-            r.to,
-            r.purpose,
-            r.status,
-          ])}
-        />
-      </section>
     </div>
   );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-white border border-msb-mist rounded-lg p-4">
+    <div className="bg-white border border-msb-mist rounded-2xl p-4 shadow-sm">
       <div className="text-xs text-stone-500">{label}</div>
       <div className="text-xl font-semibold mt-1 text-msb-orange">{value}</div>
     </div>
@@ -119,7 +85,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
   return (
-    <div className="mt-3 overflow-x-auto bg-white border border-msb-mist rounded-lg">
+    <div className="mt-3 overflow-x-auto bg-white border border-msb-mist rounded-2xl shadow-sm">
       <table className="w-full text-sm">
         <thead className="bg-msb-mist text-left">
           <tr>

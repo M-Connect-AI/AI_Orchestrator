@@ -6,11 +6,13 @@ export default {
     extend: {
       colors: {
         msb: {
-          orange: "#F58220",
-          "orange-dark": "#E06F12",
-          cream: "#FFF6ED",
-          ink: "#2A2118",
-          mist: "#FFF1E4",
+          orange: "#F15A22",
+          "orange-dark": "#D44512",
+          "orange-deep": "#C7370F",
+          cream: "#FFF3EC",
+          ink: "#1C1410",
+          mist: "#FFE8DA",
+          surface: "#F6F6F6",
         },
       },
     },

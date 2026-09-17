@@ -85,6 +85,10 @@ export class ThreadService {
       $set.messages = patch.messages.map((m) => ({
         role: m.role,
         content: String(m.content ?? ""),
+        ...(m.blocks?.length ? { blocks: m.blocks } : {}),
+        ...(m.highlights?.length ? { highlights: m.highlights } : {}),
+        ...(m.uiAction ? { uiAction: m.uiAction } : {}),
+        ...(m.suggestions?.length ? { suggestions: m.suggestions } : {}),
       }));
     }
     await this.threads.updateOne({ _id: doc._id }, { $set }).exec();

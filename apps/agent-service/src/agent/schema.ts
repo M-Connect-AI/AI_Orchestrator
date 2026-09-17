@@ -11,6 +11,8 @@ export type Slots = {
   daysHint: string | null;
   ordinal: string | null;
   listedIds: string | null;
+  /** Id mail từ outlook_list_mails gần nhất (phân tách bằng `\n`). */
+  listedMailIds: string | null;
   destination: string | null;
   purpose: string | null;
   tripId: string | null;
@@ -28,6 +30,7 @@ export function emptySlots(): Slots {
     daysHint: null,
     ordinal: null,
     listedIds: null,
+    listedMailIds: null,
     destination: null,
     purpose: null,
     tripId: null,

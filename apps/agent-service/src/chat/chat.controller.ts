@@ -36,7 +36,9 @@ export class ChatController {
     @Body() dto: ChatDto,
     @Res() reply: FastifyReply,
   ) {
-    const message = dto.confirm ? "đồng ý xác nhận" : dto.message;
+    const message = dto.confirm
+      ? dto.message?.trim() || "đồng ý xác nhận"
+      : String(dto.message ?? "");
     reply.hijack();
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
@@ -55,17 +57,26 @@ export class ChatController {
       const result = await this.chat.turn(user, message, dto.threadId, (event, data) => {
         if (event === "token") streamed = true;
         send(event, data);
-      });
+      }, { confirm: Boolean(dto.confirm) });
       if (!streamed && result.reply) {
         for (const part of chunkText(result.reply)) {
           send("token", { text: part });
         }
       }
       if (result.confirm) send("confirm", result.confirm);
-      if (result.executed) send("result", { executed: result.executed });
+      // Chỉ emit khi đã ghi hệ thống — không dump list/preview đọc.
+      if (result.didMutate && result.executed) {
+        send("result", { executed: result.executed });
+      }
       send("done", {
         threadId: result.threadId,
-        citations: result.citations,
+        reply: result.reply ?? "",
+        confirm: result.confirm ?? null,
+        uiAction: result.uiAction ?? null,
+        blocks: result.blocks ?? [],
+        highlights: result.highlights ?? [],
+        suggestions: result.suggestions ?? [],
+        didMutate: result.didMutate,
       });
     } catch (e) {
       send("error", { message: e instanceof Error ? e.message : "Agent error" });
