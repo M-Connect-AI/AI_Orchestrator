@@ -13,34 +13,18 @@ export type FollowUpInput = {
   reply?: string;
 };
 
-type Completer = (
-  messages: { role: string; content: string }[],
-  opts?: { temperature?: number; max_tokens?: number },
-) => Promise<string>;
-
-export async function suggestFollowUps(
+/** Chip từ model nếu có; không thì rule domain. Không gọi LLM thêm. */
+export function resolveFollowUps(
+  fromModel: ChatSuggestion[] | undefined,
   input: FollowUpInput,
-  complete: Completer,
-): Promise<ChatSuggestion[]> {
+): ChatSuggestion[] {
   if (input.confirm) return [];
-  try {
-    const raw = await complete(
-      [
-        { role: "system", content: FOLLOWUP_SYSTEM },
-        { role: "user", content: JSON.stringify(followUpPayload(input)) },
-      ],
-      { temperature: 0.3, max_tokens: 220 },
-    );
-    const parsed = parseSuggestions(raw);
-    const cleaned = sanitize(parsed, input);
-    if (cleaned.length) return cleaned;
-  } catch {
-    /* fallback */
-  }
-  return sanitize(buildFollowUps(input), input);
+  const cleaned = sanitize(fromModel ?? [], input);
+  if (cleaned.length) return cleaned;
+  return buildFollowUps(input);
 }
 
-/** Fallback khi LLM lỗi — ưu tiên uiAction.key, không nhảy domain. */
+/** Chip bước tiếp theo khi model không gọi suggest_follow_ups. */
 export function buildFollowUps(input: FollowUpInput): ChatSuggestion[] {
   if (input.confirm) return [];
   const isManager = input.role === "MANAGER";
@@ -88,68 +72,6 @@ export function buildFollowUps(input: FollowUpInput): ChatSuggestion[] {
       : [s("Tôi còn bao nhiêu ngày phép?"), s("Thống kê task Jira của tôi")];
   }
   return sanitize(items, input);
-}
-
-const FOLLOWUP_SYSTEM = `Bạn đề xuất bước tiếp theo trên chat M-Mate (MSB).
-Trả về JSON array 2 hoặc 3 chuỗi chip: [{"label":"...","text":"..."}]. Không markdown.
-
-QUAN TRỌNG: label và text PHẢI GIỐNG NHAU. Đó chính là tin nhắn sẽ gửi khi user bấm chip. Không viết label ngắn rồi text dài khác nghĩa.
-
-Ví dụ đúng: {"label":"Tóm tắt mail đầu tiên","text":"Tóm tắt mail đầu tiên"}
-Ví dụ sai: {"label":"Tóm tắt hộp thư","text":"Liệt kê lại tất cả mail"}
-
-Câu 2–8 từ, tiếng Việt, đủ để gửi ngay.
-
-BẮT BUỘC:
-- Bám đúng chủ đề lượt vừa rồi (mail → mail/lịch; phép → phép; Jira → Jira; công tác → công tác). Không nhảy domain khác.
-- Việc user có thể làm tiếp — không lặp đúng câu vừa hỏi.
-- Sau danh sách mail: gợi ý đọc/tóm tắt 1 thư (vd. "Tóm tắt mail đầu tiên"), không gợi ý liệt kê lại hộp thư.
-- Không trùng nút UI (uiAction.label).
-- Không bịa tiêu đề mail, mã đơn, mã Jira.
-- STAFF không gợi ý duyệt đơn người khác.`;
-
-function followUpPayload(input: FollowUpInput) {
-  const blockHint = (input.blocks ?? [])
-    .map((b) => {
-      if (b.type === "kpis") return `kpis:${b.items.map((i) => `${i.label}=${i.value}`).join(",")}`;
-      if (b.type === "list") return `list:${b.title ?? ""} (${b.items.length})`;
-      if (b.type === "progress") return `progress:${b.title}`;
-      if (b.type === "quote") return `quote:${b.title}`;
-      if (b.type === "bars" || b.type === "donut") return `${b.type}:${b.title}`;
-      return "";
-    })
-    .slice(0, 6);
-  return {
-    role: input.role,
-    userMessage: clip(input.userMessage ?? "", 180),
-    assistantReply: clip(input.reply ?? "", 280),
-    uiAction: input.uiAction
-      ? { key: input.uiAction.key, label: input.uiAction.label }
-      : null,
-    didMutate: Boolean(input.didMutate),
-    blocks: blockHint,
-  };
-}
-
-function parseSuggestions(raw: string): ChatSuggestion[] {
-  const t = raw.replace(/```(?:json)?/gi, "").trim();
-  const start = t.indexOf("[");
-  const end = t.lastIndexOf("]");
-  if (start < 0 || end <= start) return [];
-  try {
-    const arr = JSON.parse(t.slice(start, end + 1)) as unknown;
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .map((row) => {
-        const rec = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
-        const label = String(rec.label ?? rec.title ?? "").replace(/\s+/g, " ").trim();
-        const text = String(rec.text ?? rec.message ?? rec.query ?? "").replace(/\s+/g, " ").trim();
-        return label && text ? { label: clip(label, 42), text: clip(text, 90) } : null;
-      })
-      .filter((x): x is ChatSuggestion => Boolean(x));
-  } catch {
-    return [];
-  }
 }
 
 function sanitize(items: ChatSuggestion[], input: FollowUpInput): ChatSuggestion[] {

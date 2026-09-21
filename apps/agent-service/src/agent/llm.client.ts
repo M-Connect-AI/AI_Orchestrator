@@ -61,8 +61,7 @@ export class LlmClient {
         max_tokens: opts.max_tokens ?? 512,
         temperature: opts.temperature ?? 0,
         top_p: 0.9,
-        enable_thinking: false,
-        chat_template_kwargs: { enable_thinking: false },
+        ...this.generationExtras(model),
       },
     );
     const data = JSON.parse(text) as {
@@ -88,8 +87,7 @@ export class LlmClient {
         max_tokens: opts.max_tokens ?? 1024,
         temperature: opts.temperature ?? 0.3,
         top_p: 0.9,
-        enable_thinking: false,
-        chat_template_kwargs: { enable_thinking: false },
+        ...this.generationExtras(model),
       },
     );
     const data = JSON.parse(text) as {
@@ -147,8 +145,7 @@ export class LlmClient {
           temperature: opts.temperature ?? 0,
           top_p: 0.9,
           stream: true,
-          enable_thinking: false,
-          chat_template_kwargs: { enable_thinking: false },
+          ...this.generationExtras(model),
         }),
       },
     );
@@ -181,6 +178,21 @@ export class LlmClient {
       }
       if (done) break;
     }
+  }
+
+  /** Qwen accepts enable_thinking=false; GLM-5.3 always thinks and rejects disable. */
+  private generationExtras(model: string): Record<string, unknown> {
+    if (alwaysThinkingModel(model)) {
+      return {
+        reasoning_effort: parseReasoningEffort(
+          this.config.get<string>("LLM_REASONING_EFFORT"),
+        ),
+      };
+    }
+    return {
+      enable_thinking: false,
+      chat_template_kwargs: { enable_thinking: false },
+    };
   }
 
   private async postChatCompletions(
@@ -241,6 +253,16 @@ export function isRateLimitError(err: unknown): boolean {
 
 export function stripThink(raw: string) {
   return raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+function alwaysThinkingModel(model: string) {
+  return /glm-5\.3/i.test(model);
+}
+
+function parseReasoningEffort(raw?: string): "low" | "high" | "max" {
+  const v = raw?.trim().toLowerCase();
+  if (v === "high" || v === "max" || v === "low") return v;
+  return "low";
 }
 
 function isRateLimitStatus(status: number, message: string) {

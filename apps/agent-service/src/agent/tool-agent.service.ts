@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ChatBlock, ChatConfirmAction, ChatHighlight, ChatUiAction } from "@msb/shared";
+import { ChatBlock, ChatConfirmAction, ChatHighlight, ChatSuggestion, ChatUiAction } from "@msb/shared";
 import { buildChatBlocks, highlightChatText, spokenFactsFromPreview } from "./chat-blocks";
 import { Actor } from "../auth/jwt-auth.guard";
 import { AGENT_TOOL_DEFS, PENDING_RESOLUTION_TOOLS } from "./agent-tools";
@@ -30,6 +30,7 @@ export type AgentTurnResult = {
   uiAction: ChatUiAction | null;
   blocks: ChatBlock[];
   highlights: ChatHighlight[];
+  suggestions: ChatSuggestion[];
 };
 
 export type AgentProgress = (event: "status" | "token", data: unknown) => void;
@@ -53,11 +54,11 @@ BẮT BUỘC — định dạng text thuần:
 - CẤM nói đã duyệt/đã gửi nếu nháp chỉ là danh sách đơn hoặc đề xuất chờ xác nhận.
 - CẤM đổi ngày/loại phép/tên người so với nháp (ví dụ nháp là 06/09 phép ốm thì không viết thành 08/09 phép năm).
 - CẤM nhắc user “vào tab Kết quả / mở Jira / mở Outlook” — client sẽ hiện nút theo uiAction.
-- Nếu nháp có “đã hiện trên thẻ” / “nằm trên thẻ”: chỉ 1–2 câu tóm tắt đúng số liệu trong nháp. CẤM liệt kê lại từng đơn / mail / sự kiện / task thành gạch đầu dòng hay “Cụ thể:”.
+- Khi nháp là tóm tắt số liệu (số đơn / mail / sự kiện / task): chỉ 1–2 câu đúng số liệu. CẤM liệt kê lại từng mục thành gạch đầu dòng hay “Cụ thể:”. CẤM nói “trên thẻ”, “đã hiện trên thẻ”, “nằm trên thẻ”.
 - CẤM bịa đơn, mail, ngày, trạng thái, tiêu đề, địa điểm, phòng họp, người tham dự không có trong nháp.
 - Nếu nháp không nêu địa điểm / phòng họp thì CẤM viết “tại …”, “Phòng họp …”. Thiếu field thì bỏ, không đoán.
 - Giữ nguyên số liệu, ngày, mã đơn, kết luận từ nháp. Chỉ khi nháp là tóm tắt NỘI DUNG từng mail (outlook_get_mail) mới được nêu từng mail — không rút bớt số lượng.
-2–8 câu. Không gạch đầu dòng khi dữ liệu đã hiện trên thẻ.
+2–8 câu. Không gạch đầu dòng khi nháp đã là tóm tắt số liệu.
 Chỉ trả lời nội dung cho user, không JSON.`;
 
 @Injectable()
@@ -112,152 +113,6 @@ export class ToolAgentService {
         onProgress,
       );
       return done(reply, { slots, pending, confirm: null });
-    }
-
-    const jiraRoute = directJiraRoute(message);
-    if (jiraRoute) {
-      onProgress?.("status", { label: statusLabel(jiraRoute.name) });
-      const run = await this.runner.run(
-        jiraRoute.name,
-        JSON.stringify(jiraRoute.args),
-        { actor, slots, pending },
-      );
-      const payload = readToolPayload(run.content);
-      const draft =
-        payload.summary ||
-        payload.error ||
-        "Không lấy được dữ liệu Jira phù hợp với yêu cầu.";
-      const reply = speakApiFacts(run.effects.preview, draft, onProgress);
-      return finish(
-        {
-          reply,
-          confirm: null,
-          pending,
-          executed: null,
-          didMutate: false,
-          citations: run.effects.citations ?? [],
-          slots: run.effects.slots ?? slots,
-          intent: input.intent ?? "",
-          uiAction:
-            run.effects.uiAction ??
-            resolveChatUiAction({
-              preview: run.effects.preview,
-              needConnect: Boolean(payload.needConnect),
-            }),
-        },
-        { preview: run.effects.preview },
-      );
-    }
-
-    const calendarRoute = directOutlookCalendarRoute(message);
-    if (calendarRoute) {
-      onProgress?.("status", { label: statusLabel("outlook_list_calendar") });
-      const run = await this.runner.run(
-        "outlook_list_calendar",
-        JSON.stringify(calendarRoute),
-        { actor, slots, pending },
-      );
-      const payload = readToolPayload(run.content);
-      const draft =
-        payload.summary ||
-        payload.error ||
-        "Không lấy được lịch Outlook.";
-      const reply = speakApiFacts(run.effects.preview, draft, onProgress);
-      return finish(
-        {
-          reply,
-          confirm: null,
-          pending,
-          executed: null,
-          didMutate: false,
-          citations: run.effects.citations ?? [],
-          slots: run.effects.slots ?? slots,
-          intent: input.intent ?? "",
-          uiAction:
-            run.effects.uiAction ??
-            resolveChatUiAction({
-              preview: run.effects.preview,
-              needConnect: Boolean(payload.needConnect),
-            }),
-        },
-        { preview: run.effects.preview },
-      );
-    }
-
-    const hrRoute = directHrReadRoute(message);
-    if (hrRoute) {
-      onProgress?.("status", { label: statusLabel(hrRoute.name) });
-      const run = await this.runner.run(hrRoute.name, JSON.stringify(hrRoute.args), {
-        actor,
-        slots,
-        pending,
-      });
-      const payload = readToolPayload(run.content);
-      const draft = payload.summary || payload.error || "Không lấy được dữ liệu từ hệ thống.";
-      const reply = speakApiFacts(run.effects.preview, draft, onProgress);
-      return finish(
-        {
-          reply,
-          confirm: null,
-          pending,
-          executed: null,
-          didMutate: false,
-          citations: run.effects.citations ?? [],
-          slots: run.effects.slots ?? slots,
-          intent: input.intent ?? "",
-          uiAction:
-            run.effects.uiAction ??
-            resolveChatUiAction({
-              preview: run.effects.preview,
-              needConnect: Boolean(payload.needConnect),
-            }),
-        },
-        { preview: run.effects.preview },
-      );
-    }
-
-    const getMail = directOutlookGetMailRoute(message);
-    if (getMail) {
-      return this.readOneOutlookMail({
-        message,
-        actor,
-        slots,
-        pending,
-        onProgress,
-        spec: getMail,
-      });
-    }
-
-    const mailRoute = directOutlookMailRoute(message);
-    if (mailRoute) {
-      onProgress?.("status", { label: statusLabel("outlook_list_mails") });
-      const run = await this.runner.run("outlook_list_mails", JSON.stringify(mailRoute), {
-        actor,
-        slots,
-        pending,
-      });
-      const payload = readToolPayload(run.content);
-      const draft = payload.summary || payload.error || "Không lấy được hộp thư Outlook.";
-      const reply = speakApiFacts(run.effects.preview, draft, onProgress);
-      return finish(
-        {
-          reply,
-          confirm: null,
-          pending,
-          executed: null,
-          didMutate: false,
-          citations: run.effects.citations ?? [],
-          slots: run.effects.slots ?? slots,
-          intent: input.intent ?? "",
-          uiAction:
-            run.effects.uiAction ??
-            resolveChatUiAction({
-              preview: run.effects.preview,
-              needConnect: Boolean(payload.needConnect),
-            }),
-        },
-        { preview: run.effects.preview },
-      );
     }
 
     // Có pending: để MODEL quyết đồng ý/hủy qua tool (không regex "oke").
@@ -360,6 +215,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
           slots: run.slots,
           intent: input.intent ?? "",
           uiAction: null,
+          suggestions: run.suggestions,
         },
         { preview: run.preview },
       );
@@ -395,6 +251,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
           slots: run.slots,
           intent: input.intent ?? "",
           uiAction,
+          suggestions: run.suggestions,
         },
         { preview: run.didMutate ? undefined : run.preview },
       );
@@ -415,6 +272,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
           slots: run.slots,
           intent: input.intent ?? "",
           uiAction,
+          suggestions: run.suggestions,
         },
         { preview: run.preview },
       );
@@ -435,6 +293,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
           slots: run.slots,
           intent: input.intent ?? "",
           uiAction: null,
+          suggestions: run.suggestions,
         });
       }
       const reply = sanitizeReply(draft) || "Đã ghi lên hệ thống thành công.";
@@ -452,6 +311,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
           uiAction ??
           resolveChatUiAction({ executed: run.executed }) ??
           uiActionFromPendingTool(pending?.tool ?? run.confirm?.tool),
+        suggestions: run.suggestions,
       });
     }
 
@@ -475,6 +335,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
         slots: run.slots,
         intent: input.intent ?? "",
         uiAction,
+        suggestions: run.suggestions,
       },
       { preview: run.preview },
     );
@@ -576,6 +437,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
       didCancel: false,
       rateLimited: false,
       uiAction: null as ChatUiAction | null,
+      suggestions: [] as ChatSuggestion[],
     };
 
     const messages: ChatMessage[] = input.seedMessages
@@ -613,7 +475,9 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
         if (result.tool_calls.length) {
           messages.push(result.raw);
           for (const tc of result.tool_calls) {
-            input.onProgress?.("status", { label: statusLabel(tc.function.name) });
+            if (tc.function.name !== "suggest_follow_ups") {
+              input.onProgress?.("status", { label: statusLabel(tc.function.name) });
+            }
             const run = await this.runner.run(tc.function.name, tc.function.arguments, {
               actor: input.actor,
               slots,
@@ -628,6 +492,7 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
               if (e.mutated) state.didMutate = true;
               if (e.citations?.length) state.citations = e.citations;
               if (e.uiAction !== undefined) state.uiAction = e.uiAction;
+              if (e.suggestions?.length) state.suggestions = e.suggestions;
             });
             const parsed = readToolPayload(run.content);
             if (parsed.needConnect && !state.uiAction) {
@@ -671,6 +536,10 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
           }
           // Propose (chờ confirm) / đã mutate / đã cancel → dừng vòng tool.
           if (state.confirm || state.didMutate || state.didCancel) break;
+          const onlyFollowUps = result.tool_calls.every(
+            (tc) => tc.function.name === "suggest_follow_ups",
+          );
+          if (onlyFollowUps && (state.preview != null || state.toolSummary)) break;
           continue;
         }
 
@@ -702,151 +571,8 @@ Nếu propose_* mới → thay pending. Không nói đã duyệt/đã gửi khi 
       draft: state.draft,
       rateLimited: state.rateLimited,
       uiAction: state.uiAction,
+      suggestions: state.suggestions,
     };
-  }
-
-  private async readOneOutlookMail(input: {
-    message: string;
-    actor: Actor;
-    slots: Slots;
-    pending: ChatConfirmAction | null;
-    onProgress?: AgentProgress;
-    spec: { ordinal: string; count: number; unreadOnly: boolean };
-  }): Promise<AgentTurnResult> {
-    const { message, actor, pending, onProgress, spec } = input;
-    let slots = input.slots;
-    const count = Math.min(Math.max(spec.count || 1, 1), 8);
-    const needList = spec.unreadOnly || !String(slots.listedMailIds ?? "").trim();
-    if (needList) {
-      onProgress?.("status", { label: statusLabel("outlook_list_mails") });
-      const listRun = await this.runner.run(
-        "outlook_list_mails",
-        JSON.stringify({
-          unreadOnly: spec.unreadOnly,
-          ...(parseRelativeDayRange(message) ?? {}),
-        }),
-        { actor, slots, pending },
-      );
-      const listPayload = readToolPayload(listRun.content);
-      if (listPayload.needConnect || (listPayload.error && listPayload.ok === false)) {
-        const draft =
-          listPayload.summary || listPayload.error || "Không lấy được hộp thư Outlook.";
-        const reply = speakApiFacts(listRun.effects.preview, draft, onProgress);
-        return finish(
-          {
-            reply,
-            confirm: null,
-            pending,
-            executed: null,
-            didMutate: false,
-            citations: listRun.effects.citations ?? [],
-            slots: listRun.effects.slots ?? slots,
-            intent: "",
-            uiAction:
-              listRun.effects.uiAction ??
-              resolveChatUiAction({
-                preview: listRun.effects.preview,
-                needConnect: Boolean(listPayload.needConnect),
-              }),
-          },
-          { preview: listRun.effects.preview },
-        );
-      }
-      slots = listRun.effects.slots ?? slots;
-      const listed = String(slots.listedMailIds ?? "")
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (!listed.length) {
-        const draft = listPayload.summary || "Không có mail phù hợp để đọc.";
-        const reply = speakApiFacts(listRun.effects.preview, draft, onProgress);
-        return finish(
-          {
-            reply,
-            confirm: null,
-            pending,
-            executed: null,
-            didMutate: false,
-            citations: listRun.effects.citations ?? [],
-            slots,
-            intent: "",
-            uiAction: listRun.effects.uiAction ?? null,
-          },
-          { preview: listRun.effects.preview },
-        );
-      }
-    }
-
-    const start = Math.max(Number(spec.ordinal) || 1, 1);
-    const summaries: string[] = [];
-    const mails: unknown[] = [];
-    let lastRun: Awaited<ReturnType<ToolRunnerService["run"]>> | null = null;
-    for (let i = 0; i < count; i++) {
-      onProgress?.("status", { label: statusLabel("outlook_get_mail") });
-      const getRun = await this.runner.run(
-        "outlook_get_mail",
-        JSON.stringify({ ordinal: String(start + i) }),
-        { actor, slots, pending },
-      );
-      lastRun = getRun;
-      slots = getRun.effects.slots ?? slots;
-      const payload = readToolPayload(getRun.content);
-      if (payload.needConnect || (payload.error && payload.ok === false && !payload.summary)) {
-        const draft = payload.summary || payload.error || "Không đọc được nội dung mail.";
-        const reply =
-          summaries.length > 0
-            ? await this.phraseStream(
-                `${summaries.join("\n\n")}\n\n${draft}`,
-                message,
-                onProgress,
-                { keepMailBody: true },
-              )
-            : await this.phraseStream(draft, message, onProgress, { keepMailBody: true });
-        return finish(
-          {
-            reply,
-            confirm: null,
-            pending,
-            executed: null,
-            didMutate: false,
-            citations: getRun.effects.citations ?? [],
-            slots,
-            intent: "",
-            uiAction:
-              getRun.effects.uiAction ??
-              resolveChatUiAction({
-                preview: mails.length ? mails : getRun.effects.preview,
-                needConnect: Boolean(payload.needConnect),
-              }),
-          },
-          { preview: mails.length === 1 ? mails[0] : mails.length ? mails : getRun.effects.preview },
-        );
-      }
-      if (payload.summary) summaries.push(payload.summary);
-      if (getRun.effects.preview) mails.push(getRun.effects.preview);
-    }
-    const draft = summaries.join("\n\n---\n\n") || "Không đọc được nội dung mail.";
-    const reply = await this.phraseStream(draft, message, onProgress, {
-      forbidFakeSuccess: true,
-      keepMailBody: true,
-    });
-    const preview = mails.length === 1 ? mails[0] : mails;
-    return finish(
-      {
-        reply,
-        confirm: null,
-        pending,
-        executed: null,
-        didMutate: false,
-        citations: lastRun?.effects.citations ?? [],
-        slots,
-        intent: "",
-        uiAction:
-          lastRun?.effects.uiAction ??
-          resolveChatUiAction({ preview }),
-      },
-      { preview },
-    );
   }
 
   private async phraseStream(
@@ -945,8 +671,10 @@ QUYẾT ĐỊNH BẰNG TOOL:
 - Nếu tool báo không khớp bộ lọc: nói rõ và liệt kê đơn chờ, hỏi lại — không chọn đơn khác thay thế.
 - Cấm nói đã gửi/tạo/duyệt thành công nếu chưa có kết quả ok từ confirm_pending_action.
 - Thiếu thông tin → hỏi. Số liệu thật → luôn gọi get_leave_balance / list_pending_approvals / list_leaves / list_trips / search_policy / outlook_* / jira_* trong lượt này. CẤM trả lời danh sách đơn/mail/lịch/Jira từ hội thoại trước hoặc nhớ.
+- Ở lượt tool đầu: LUÔN gọi thêm suggest_follow_ups SONG SONG với tool nghiệp vụ (2–3 câu user gửi được ngay, bám đúng việc đang hỏi, không nhảy domain, STAFF không gợi ý duyệt đơn người khác). Khi đang mời xác nhận propose_* thì items=[].
 - “Đơn cần duyệt / chờ duyệt / có đơn nào để duyệt” (không nói rõ loại): CHỈ gọi list_pending_approvals — tool này đã gồm cả nghỉ phép + công tác. CẤM chỉ gọi list_trips hoặc chỉ list_leaves.
-- User nói rõ “nghỉ phép” → list_leaves. User nói rõ “công tác” → list_trips.
+- Xem / liệt kê / đang có đơn nghỉ phép → list_leaves. Xin nghỉ / tạo đơn phép → propose_create_leave.
+- Xem / liệt kê / đang có đơn công tác → list_trips. Tạo / xin / đăng ký công tác (kèm nơi, ngày, mục đích) → propose_create_trip. CẤM list_trips khi user muốn TẠO đơn mới.
 - Duyệt công tác → propose_approve_trips / propose_reject_trips. Duyệt nghỉ phép → propose_approve_leaves / propose_reject_leaves.
 - STAFF không xem/duyệt đơn người khác. MANAGER duyệt team.
 - Outlook MAIL → outlook_list_mails. RULE NGÀY (bắt buộc):
@@ -970,7 +698,7 @@ QUYẾT ĐỊNH BẰNG TOOL:
 - Trả lời mail → sau khi đã list/get: propose_reply_outlook_mail(ordinal, comment). PHẢI chờ xác nhận trước khi gửi.
 - needConnect / thiếu quyền Write → nhắc Ngắt rồi Kết nối lại Outlook (Calendars.ReadWrite + Mail.ReadWrite/Mail.Send).
 - Jira: câu hỏi tổng quan task của tôi → jira_my_work_summary; cần danh sách theo trạng thái → jira_list_my_tasks; phân tích backlog/rủi ro/ưu tiên → jira_analyze_backlog.
-- Khi tool Jira báo “Số liệu đã hiện trên thẻ”: draft 1–2 câu, KHÔNG liệt kê Cần làm/Đang làm/Đã làm/quá hạn thành gạch đầu dòng. UI tự vẽ thẻ.
+- Khi tool Jira trả số liệu tổng: draft 1–2 câu, KHÔNG liệt kê Cần làm/Đang làm/Đã làm/quá hạn thành gạch đầu dòng. CẤM nói “trên thẻ”.
 - Tạo Jira task mới → propose_create_jira_task khi đã có projectKey và summary; thiếu trường nào thì hỏi trường đó. Sau khi propose phải chờ user xác nhận, không confirm trong cùng lượt. Task được gán theo email tài khoản M-Connect.
 - RULE ASSIGNEE JIRA: user vai trò STAFF chỉ được assign task cho chính mình, tức email ${actor.email}. Nếu STAFF yêu cầu assign cho email/tên người khác: KHÔNG gọi propose_create_jira_task, KHÔNG tự đổi assignee, KHÔNG tạo pending action. Trả lời chính xác: “Theo rule phân quyền, nhân viên chỉ được tạo Jira task và assign cho chính mình. Bạn không thể assign task cho người khác.”
 - Không được nói lỗi kết nối, thiếu quyền Jira MCP hoặc thiếu thông tin khi nguyên nhân thực tế là vi phạm rule assignee trên.
@@ -979,189 +707,6 @@ QUYẾT ĐỊNH BẰNG TOOL:
 - Jira của CBNV luôn được scope theo email tài khoản M-Connect. Không tự tạo JQL và không hỏi credential trong chat.
 - Chỉ MANAGER được dùng jira_analyze_backlog scope=PROJECT và phải có projectKey. Jira chỉ hỗ trợ đọc và tạo task có xác nhận; chưa hỗ trợ sửa/xóa/chuyển trạng thái.
 - Tool args: ANNUAL|SICK|UNPAID; trả lời user luôn tiếng Việt đời thường.`;
-}
-
-function directJiraRoute(message: string): {
-  name: "jira_my_work_summary" | "jira_list_my_tasks" | "jira_analyze_backlog";
-  args: Record<string, unknown>;
-} | null {
-  const text = message.toLowerCase();
-  if (!/\b(jira|task|backlog|board|sprint)\b/i.test(text)) return null;
-  if (
-    /(tạo|thêm|create|new).{0,40}(jira|task|issue)|(jira|task|issue).{0,20}(mới|tạo|thêm)/i.test(
-      text,
-    )
-  ) {
-    return null;
-  }
-
-  if (/backlog|rủi ro|ưu tiên/.test(text)) {
-    return { name: "jira_analyze_backlog", args: { scope: "ME" } };
-  }
-  if (/thống kê|tổng quan|bao nhiêu/.test(text)) {
-    return { name: "jira_my_work_summary", args: {} };
-  }
-
-  let statusGroup: "TODO" | "IN_PROGRESS" | "DONE" | "NOT_DONE" | "ALL" = "ALL";
-  if (/chưa hoàn thành|chưa xong|not done/.test(text)) statusGroup = "NOT_DONE";
-  else if (/đang làm|đang thực hiện|in progress/.test(text)) statusGroup = "IN_PROGRESS";
-  else if (/đã làm|hoàn thành|\bdone\b/.test(text)) statusGroup = "DONE";
-  else if (/\btodo\b|to do|cần làm/.test(text)) statusGroup = "TODO";
-
-  return { name: "jira_list_my_tasks", args: { statusGroup } };
-}
-
-function directHrReadRoute(message: string): { name: string; args: Record<string, unknown> } | null {
-  const text = message.toLowerCase().normalize("NFC");
-  if (
-    /(xin nghỉ|muốn xin|tạo đơn|đăng ký nghỉ|hủy đơn|sửa đơn|đổi ngày|duyệt|từ chối|xác nhận gửi)/.test(
-      text,
-    )
-  ) {
-    return null;
-  }
-  if (/công tác/.test(text) && /(xem|đơn|có|liệt kê|danh sách|nào)/.test(text)) {
-    return { name: "list_trips", args: {} };
-  }
-  if (
-    /(còn|số dư|bao nhiêu).{0,24}(ngày )?phép|phép.{0,24}(còn|số dư|bao nhiêu)/.test(text) &&
-    !/đơn/.test(text)
-  ) {
-    return { name: "get_leave_balance", args: {} };
-  }
-  if (
-    /(đơn nghỉ|nghỉ phép|xem đơn|liệt kê.{0,16}đơn|có đơn|đơn của tôi)/.test(text) &&
-    !/(mail|jira|lịch|công tác)/.test(text)
-  ) {
-    if (/chờ duyệt|cần duyệt/.test(text)) return { name: "list_pending_approvals", args: {} };
-    return { name: "list_leaves", args: {} };
-  }
-  return null;
-}
-
-function directOutlookGetMailRoute(
-  message: string,
-): { ordinal: string; count: number; unreadOnly: boolean } | null {
-  const text = message.toLowerCase().normalize("NFC");
-  if (!/(mail|email|thư)/i.test(text)) return null;
-  if (/(trả lời|reply|soạn|gửi mail|forward|chuyển tiếp)/i.test(text)) return null;
-  const nth = /(?:thứ|số)\s*(\d+)/i.exec(text);
-  const first = /(đầu tiên|mail đầu|email đầu|thư đầu)/i.test(text);
-  const howMany = /(?:tóm tắt|đọc|xem)\s*(\d+)\s*(?:mail|email|thư)/i.exec(text);
-  const wantsBody =
-    first ||
-    Boolean(nth) ||
-    /(tóm tắt|summarize|nội dung|chi tiết|đọc mail|đọc email|đọc thư)/i.test(text) ||
-    /(đọc|xem|hiển thị|mở).{0,24}(nội dung|chi tiết).{0,16}(mail|email|thư)/i.test(text);
-  if (!wantsBody) return null;
-  const count = first || nth ? 1 : Math.min(Math.max(Number(howMany?.[1] || 1), 1), 8);
-  return {
-    ordinal: nth?.[1] ?? "1",
-    count,
-    unreadOnly: /chưa đọc|chưa xem/.test(text),
-  };
-}
-
-function directOutlookMailRoute(message: string): Record<string, unknown> | null {
-  const text = message.toLowerCase().normalize("NFC");
-  if (!/(mail|email|hộp thư|thư đến)/i.test(text)) return null;
-  if (
-    /(trả lời|reply|soạn|gửi mail|forward|chuyển tiếp|tóm tắt|summarize|mail thứ|mail đầu|đầu tiên|đọc mail|nội dung mail|chi tiết mail|xem chi tiết)/i.test(
-      text,
-    )
-  ) {
-    return null;
-  }
-  const unreadOnly = /chưa đọc|chưa xem/.test(text);
-  const range = parseRelativeDayRange(text);
-  return { unreadOnly, ...(range ?? {}) };
-}
-
-function parseRelativeDayRange(text: string): { from: string; to: string } | null {
-  const today = nowInVietnam();
-  const iso = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  };
-  const addDays = (d: Date, n: number) => {
-    const x = new Date(d);
-    x.setDate(x.getDate() + n);
-    return x;
-  };
-  if (!/(hôm nay|hôm qua|ngày mai|ngày kia|tuần này|tuần trước|tháng này)/.test(text)) return null;
-  if (/tuần này|tuần trước/.test(text)) {
-    const base = /tuần trước/.test(text) ? addDays(today, -7) : today;
-    const day = (base.getDay() + 6) % 7;
-    const mon = addDays(base, -day);
-    const sun = addDays(mon, 6);
-    return { from: iso(mon), to: iso(sun) };
-  }
-  if (/tháng này/.test(text)) {
-    const from = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
-    const to = iso(new Date(today.getFullYear(), today.getMonth() + 1, 0));
-    return { from, to };
-  }
-  if (/hôm qua/.test(text)) {
-    const d = iso(addDays(today, -1));
-    return { from: d, to: d };
-  }
-  if (/ngày mai/.test(text)) {
-    const d = iso(addDays(today, 1));
-    return { from: d, to: d };
-  }
-  if (/ngày kia/.test(text)) {
-    const d = iso(addDays(today, 2));
-    return { from: d, to: d };
-  }
-  const d = iso(today);
-  return { from: d, to: d };
-}
-
-/** Bắt buộc gọi Graph lịch — tránh model trả lời trống / bịa sự kiện. */
-function directOutlookCalendarRoute(message: string): { from: string; to: string } | null {
-  const text = message.toLowerCase().normalize("NFC");
-  if (
-    /(tạo|đặt|thêm|hủy|xoá|xóa|sửa).{0,30}(lịch|họp|sự kiện|meeting|event)/i.test(text) ||
-    /(lịch|họp|sự kiện|meeting|event).{0,20}(mới|cho tôi tạo)/i.test(text)
-  ) {
-    return null;
-  }
-  if (!/(lịch|họp|meeting|calendar|sự kiện)/i.test(text)) return null;
-  if (/(mail|email|hộp thư|jira|nghỉ phép|công tác)/i.test(text)) return null;
-
-  const today = nowInVietnam();
-  const iso = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  };
-  const addDays = (d: Date, n: number) => {
-    const x = new Date(d);
-    x.setDate(x.getDate() + n);
-    return x;
-  };
-
-  if (/tuần này|tuần sau/.test(text)) {
-    const base = /tuần sau/.test(text) ? addDays(today, 7) : today;
-    const day = (base.getDay() + 6) % 7; // Mon=0
-    const mon = addDays(base, -day);
-    const sun = addDays(mon, 6);
-    return { from: iso(mon), to: iso(sun) };
-  }
-  if (/ngày mai/.test(text)) {
-    const d = iso(addDays(today, 1));
-    return { from: d, to: d };
-  }
-  if (/ngày kia/.test(text)) {
-    const d = iso(addDays(today, 2));
-    return { from: d, to: d };
-  }
-  // mặc định hôm nay / “có lịch gì”
-  const d = iso(today);
-  return { from: d, to: d };
 }
 
 function historyToMessages(history: string[]): ChatMessage[] {
@@ -1185,16 +730,21 @@ function mergeEffects(
 }
 
 function finish(
-  result: Omit<AgentTurnResult, "blocks" | "highlights">,
+  result: Omit<AgentTurnResult, "blocks" | "highlights" | "suggestions"> & {
+    suggestions?: ChatSuggestion[];
+  },
   visual?: { preview?: unknown },
 ): AgentTurnResult {
   return {
     ...result,
-    blocks: buildChatBlocks({
-      preview: result.didMutate ? undefined : visual?.preview,
-      executed: result.didMutate ? result.executed : undefined,
-      citations: result.citations,
-    }),
+    suggestions: result.suggestions ?? [],
+    // Sau ghi hệ thống: chỉ text + uiAction (key/path). Không vẽ card từ đơn vừa tạo.
+    blocks: result.didMutate
+      ? []
+      : buildChatBlocks({
+          preview: visual?.preview,
+          citations: result.citations,
+        }),
     highlights: highlightChatText(result.reply),
   };
 }
@@ -1214,6 +764,7 @@ function done(
       slots: extra.slots,
       intent: extra.intent ?? "",
       uiAction: extra.uiAction ?? null,
+      suggestions: extra.suggestions,
     },
     { preview: extra.preview },
   );
@@ -1298,20 +849,6 @@ function emitChunks(text: string, onProgress?: AgentProgress) {
   for (let i = 0; i < text.length; i += size) {
     onProgress("token", { text: text.slice(i, i + size) });
   }
-}
-
-function speakApiFacts(
-  preview: unknown,
-  fallback: string,
-  onProgress?: AgentProgress,
-): string {
-  const reply =
-    spokenFactsFromPreview(preview) ||
-    sanitizeReply(fallback) ||
-    fallback.trim() ||
-    "Không lấy được dữ liệu từ hệ thống.";
-  emitChunks(reply, onProgress);
-  return reply;
 }
 
 function statusLabel(toolName: string) {

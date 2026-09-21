@@ -4,6 +4,30 @@ export const AGENT_TOOL_DEFS: ChatToolDef[] = [
   {
     type: "function",
     function: {
+      name: "suggest_follow_ups",
+      description:
+        "Gợi ý 2–3 câu user có thể gửi tiếp. Gọi SONG SONG trong cùng lượt với tool nghiệp vụ (list/propose/jira/outlook…). Chip = đúng câu sẽ gửi, bám việc đang hỏi, không trùng nút UI, không nhảy domain. STAFF không gợi ý duyệt đơn người khác. Khi đang mời xác nhận propose_* có thể items=[].",
+      parameters: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            minItems: 0,
+            maxItems: 3,
+            items: {
+              type: "string",
+              description: "Câu tiếng Việt 2–8 từ, gửi được ngay khi bấm chip.",
+            },
+          },
+        },
+        required: ["items"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_leave_balance",
       description: "Lấy số dư phép năm / phép ốm của chính người dùng đang chat.",
       parameters: { type: "object", properties: {}, additionalProperties: false },

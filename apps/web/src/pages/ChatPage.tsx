@@ -204,6 +204,10 @@ export function ChatPage() {
               return next;
             }),
           onConfirm: (card) => patchLastAssistant({ confirm: card, thinking: false }),
+          onBlocks: (blocks, highlights) =>
+            patchLastAssistant({ blocks, highlights, thinking: false }),
+          onUiAction: (uiAction) => patchLastAssistant({ uiAction, thinking: false }),
+          onSuggestions: (suggestions) => patchLastAssistant({ suggestions, thinking: false }),
         },
       );
       setThreadId(result.threadId);

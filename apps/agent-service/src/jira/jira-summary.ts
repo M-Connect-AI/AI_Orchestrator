@@ -88,8 +88,8 @@ export function formatJiraSummary(
   const extra = opts.truncated ? " (đã chạm giới hạn truy vấn)" : "";
   const summary =
     stats.total === 0
-      ? `${title}: chưa có task khớp bộ lọc. Số liệu đã hiện trên thẻ.`
-      : `${title}: ${stats.total} task${extra}. Số liệu đã hiện trên thẻ.`;
+      ? `${title}: chưa có task khớp bộ lọc.`
+      : `${title}: ${stats.total} task${extra}.`;
   return { stats, summary };
 }
 

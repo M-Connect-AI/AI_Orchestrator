@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ChatConfirmAction, ChatUiAction, LeaveType, RequestStatus } from "@msb/shared";
+import { ChatConfirmAction, ChatSuggestion, ChatUiAction, LeaveType, RequestStatus } from "@msb/shared";
 import { validateLeave, validateTrip } from "@msb/policy-docs";
 import { Actor } from "../auth/jwt-auth.guard";
 import {
@@ -69,6 +69,7 @@ export type ToolRunSideEffects = {
   slots: Slots;
   /** Nút điều hướng cho frontend/mobile */
   uiAction: ChatUiAction | null;
+  suggestions: ChatSuggestion[];
 };
 
 export type ToolRunResult = {
@@ -98,6 +99,11 @@ export class ToolRunnerService {
     }
     try {
       switch (name) {
+        case "suggest_follow_ups":
+          return {
+            content: JSON.stringify({ ok: true, items: parseFollowUpItems(args) }),
+            effects: { suggestions: parseFollowUpItems(args) },
+          };
         case "get_leave_balance":
           return this.getBalance(ctx);
         case "list_pending_approvals":
@@ -528,7 +534,7 @@ export class ToolRunnerService {
     const pendingTrips = (trips as TripRow[]).filter((r) => r.status === "PENDING");
     const leaveIds = pendingLeaves.map((r) => String(r._id ?? r.id));
     const tripIds = pendingTrips.map((r) => String(r._id ?? r.id));
-    const summary = `Tổng chờ duyệt: ${pendingLeaves.length} nghỉ phép + ${pendingTrips.length} công tác. Chi tiết đơn đã hiện trên thẻ.`;
+    const summary = `Đang chờ duyệt ${pendingLeaves.length} đơn nghỉ phép và ${pendingTrips.length} đơn công tác.`;
     return {
       content: JSON.stringify({
         ok: true,
@@ -782,7 +788,7 @@ export class ToolRunnerService {
     const summary = mails.length
       ? `Có ${mails.length} mail${unreadBit}${rangeBit}${searchBit} trên ${result.microsoftEmail ?? "Outlook"}${
           unread && !unreadOnly ? `, ${unread} chưa đọc` : ""
-        }. Danh sách đã hiện trên thẻ.`
+        }.`
       : `Không có mail${unreadBit}${rangeBit}${searchBit} trên ${result.microsoftEmail ?? "Outlook"}.`;
     const listedMailIds = mails.map((m) => m.id).join("\n");
     return {
@@ -938,7 +944,7 @@ export class ToolRunnerService {
         : `- ${e.subject}: ${when}; không có địa điểm trên lịch`;
     });
     const summary = events.length
-      ? `Lịch Outlook ${range}: ${events.length} sự kiện. Chi tiết đã hiện trên thẻ.\nChỉ dùng đúng các dòng sau. CẤM thêm phòng họp/địa điểm không có trong dòng:\n${factLines.join("\n")}`
+      ? `Lịch Outlook ${range}: ${events.length} sự kiện.\nChỉ dùng đúng các dòng sau. CẤM thêm phòng họp/địa điểm không có trong dòng:\n${factLines.join("\n")}`
       : `Lịch Outlook ${range}: không có sự kiện.`;
     return {
       content: JSON.stringify({
@@ -1751,6 +1757,29 @@ function jiraFilter(args: Record<string, unknown>): JiraTaskFilter {
 function textArg(value: unknown) {
   const text = String(value ?? "").trim();
   return text || undefined;
+}
+
+function parseFollowUpItems(args: Record<string, unknown>): ChatSuggestion[] {
+  const raw = args.items ?? args.suggestions ?? args.chips;
+  if (!Array.isArray(raw)) return [];
+  const out: ChatSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const row of raw) {
+    let label = "";
+    if (typeof row === "string") label = row.replace(/\s+/g, " ").trim();
+    else if (row && typeof row === "object") {
+      const rec = row as Record<string, unknown>;
+      label = String(rec.label ?? rec.text ?? "").replace(/\s+/g, " ").trim();
+    }
+    if (!label) continue;
+    if (label.length > 42) label = label.slice(0, 42).trim();
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ label, text: label });
+    if (out.length >= 3) break;
+  }
+  return out;
 }
 
 function numericArg(value: unknown) {

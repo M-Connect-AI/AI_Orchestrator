@@ -64,9 +64,6 @@ export class JiraToolsService {
     });
     return {
       ...formatted,
-      summary: result.issues.length
-        ? `${formatted.summary} Danh sách task nằm trên thẻ.`
-        : formatted.summary,
       issues: result.issues,
       jql,
       truncated: result.truncated,
@@ -108,9 +105,6 @@ export class JiraToolsService {
       .slice(0, 10);
     return {
       ...formatted,
-      summary: priorityItems.length
-        ? `${formatted.summary} Các task nên ưu tiên nằm trên thẻ.`
-        : formatted.summary,
       issues: result.issues,
       priorityItems,
       jql,

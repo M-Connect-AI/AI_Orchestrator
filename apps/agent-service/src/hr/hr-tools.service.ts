@@ -400,7 +400,6 @@ export function formatLeaveList(rows: LeaveRow[], scopeNote?: string) {
     `Có ${rows.length} đơn khớp${scopeNote ? ` (${scopeNote})` : ""} — tổng ${days} ngày, trong đó ${pending.length} đơn chờ duyệt.`,
     statusLine ? `Theo trạng thái: ${statusLine}.` : "",
     typeLine ? `Theo loại: ${typeLine}.` : "",
-    "Chi tiết đơn đã hiện trên thẻ (lấy từ hệ thống, không liệt kê lại).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -455,7 +454,6 @@ export function formatTripList(rows: TripRow[], scopeNote?: string) {
   const stats = [
     `Có ${rows.length} đơn công tác khớp${scopeNote ? ` (${scopeNote})` : ""}, trong đó ${pending.length} đơn chờ duyệt.`,
     statusLine ? `Theo trạng thái: ${statusLine}.` : "",
-    "Chi tiết đơn đã hiện trên thẻ (lấy từ hệ thống, không liệt kê lại).",
   ]
     .filter(Boolean)
     .join("\n");
@@ -499,7 +497,6 @@ export function summarizePendingLeaves(rows: LeaveRow[], scopeNote?: string) {
   const stats = [
     `Có ${pending.length} đơn nghỉ phép chờ duyệt${scopeNote ? ` (${scopeNote})` : ""} — tổng ${days} ngày.`,
     typeLine ? `Theo loại: ${typeLine}.` : "",
-    "Chi tiết đơn đã hiện trên thẻ (lấy từ hệ thống, không liệt kê lại).",
   ]
     .filter(Boolean)
     .join("\n");

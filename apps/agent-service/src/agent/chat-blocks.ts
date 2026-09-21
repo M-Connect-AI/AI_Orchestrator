@@ -67,14 +67,14 @@ export function spokenFactsFromPreview(preview: unknown): string | null {
     if (rows.every(isMail)) return mailSpoken(rows);
     if (rows.every(isEvent)) return eventSpoken(rows);
     if (rows.every(isJiraIssue)) {
-      return `Hiện có ${rows.length} task khớp bộ lọc. Số liệu đã hiện trên thẻ.`;
+      return `Hiện có ${rows.length} task khớp bộ lọc.`;
     }
   }
   const rec = asRecord(preview);
   if (!rec) return null;
   if (isEvent(rec)) return eventSpoken([rec]);
   if (isBalance(rec)) {
-    return `Bạn còn ${num(rec.annualRemaining)}/${num(rec.annualTotal)} ngày phép năm; khung phép ốm ${num(rec.sickRemaining)} ngày. Số liệu đã hiện trên thẻ.`;
+    return `Bạn còn ${num(rec.annualRemaining)}/${num(rec.annualTotal)} ngày phép năm, khung phép ốm ${num(rec.sickRemaining)} ngày.`;
   }
   if (Array.isArray(rec.leaves) || Array.isArray(rec.trips)) {
     const leaves = Array.isArray(rec.leaves)
@@ -83,46 +83,49 @@ export function spokenFactsFromPreview(preview: unknown): string | null {
     const trips = Array.isArray(rec.trips)
       ? rec.trips.map(asRecord).filter((r): r is Record<string, unknown> => Boolean(r && isTrip(r)))
       : [];
-    return `Tổng chờ duyệt: ${leaves.length} nghỉ phép, ${trips.length} công tác. Chi tiết đơn đã hiện trên thẻ.`;
+    return `Đang chờ duyệt ${leaves.length} đơn nghỉ phép và ${trips.length} đơn công tác.`;
   }
   if (Array.isArray(rec.issues) || rec.stats) {
     const n = Array.isArray(rec.issues) ? rec.issues.length : 0;
-    return n
-      ? `Hiện có ${n} task khớp bộ lọc. Số liệu đã hiện trên thẻ.`
-      : "Hiện chưa có task Jira khớp bộ lọc. Số liệu đã hiện trên thẻ.";
+    return n ? `Hiện có ${n} task khớp bộ lọc.` : "Hiện chưa có task Jira khớp bộ lọc.";
   }
   return null;
 }
 
 function leaveSpoken(rows: Record<string, unknown>[]) {
+  if (!rows.length) return "Bạn chưa có đơn nghỉ phép nào.";
   const pending = rows.filter((r) => String(r.status ?? "").toUpperCase() === "PENDING").length;
   const approved = rows.filter((r) => String(r.status ?? "").toUpperCase() === "APPROVED").length;
   const rejected = rows.filter((r) => String(r.status ?? "").toUpperCase() === "REJECTED").length;
-  const bits = [`Bạn có ${rows.length} đơn nghỉ phép`];
+  const bits: string[] = [];
   if (pending) bits.push(`${pending} đang chờ duyệt`);
   if (approved) bits.push(`${approved} đã được duyệt`);
   if (rejected) bits.push(`${rejected} bị từ chối`);
-  return `${bits.join(", ")}. Chi tiết đơn đã hiện trên thẻ.`;
+  return bits.length
+    ? `Bạn có ${rows.length} đơn nghỉ phép: ${bits.join(", ")}.`
+    : `Bạn có ${rows.length} đơn nghỉ phép.`;
 }
 
 function tripSpoken(rows: Record<string, unknown>[]) {
+  if (!rows.length) return "Bạn chưa có đơn công tác nào.";
   const pending = rows.filter((r) => String(r.status ?? "").toUpperCase() === "PENDING").length;
   return pending
-    ? `Bạn có ${rows.length} đơn công tác, trong đó ${pending} đang chờ duyệt. Chi tiết đơn đã hiện trên thẻ.`
-    : `Bạn có ${rows.length} đơn công tác. Chi tiết đơn đã hiện trên thẻ.`;
+    ? `Bạn có ${rows.length} đơn công tác, trong đó ${pending} đang chờ duyệt.`
+    : `Bạn có ${rows.length} đơn công tác.`;
 }
 
 function mailSpoken(rows: Record<string, unknown>[]) {
+  if (!rows.length) return "Không có mail nào khớp.";
   const unread = rows.filter((r) => r.isRead === false).length;
   return unread
-    ? `Có ${rows.length} mail, trong đó ${unread} chưa đọc. Danh sách lấy từ Outlook, đã hiện trên thẻ.`
-    : `Có ${rows.length} mail. Danh sách lấy từ Outlook, đã hiện trên thẻ.`;
+    ? `Có ${rows.length} mail, trong đó ${unread} chưa đọc.`
+    : `Có ${rows.length} mail.`;
 }
 
 function eventSpoken(rows: Record<string, unknown>[]) {
   if (!rows.length) return "Không có sự kiện trên lịch trong khoảng này.";
   if (rows.length === 1) return oneEventSpoken(rows[0]);
-  return `Có ${rows.length} sự kiện trên lịch. Chi tiết đã hiện trên thẻ.`;
+  return `Có ${rows.length} sự kiện trên lịch.`;
 }
 
 function oneEventSpoken(row: Record<string, unknown>) {
@@ -130,7 +133,7 @@ function oneEventSpoken(row: Record<string, unknown>) {
   const when = formatEventWhen(row);
   const loc = String(row.location ?? "").trim();
   const locBit = loc ? ` tại ${loc}` : "";
-  return `Bạn có sự kiện “${title}” ${when}${locBit}. Chi tiết đã hiện trên thẻ.`;
+  return `Bạn có sự kiện “${title}” ${when}${locBit}.`;
 }
 
 function collect(

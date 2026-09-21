@@ -3,8 +3,7 @@ import { Actor } from "../auth/jwt-auth.guard";
 import { ToolAgentService } from "../agent/tool-agent.service";
 import { ThreadService } from "./thread.service";
 import { ChatBlock, ChatConfirmAction, ChatHighlight, ChatSuggestion, ChatUiAction } from "@msb/shared";
-import { suggestFollowUps } from "../agent/chat-followups";
-import { LlmClient } from "../agent/llm.client";
+import { resolveFollowUps } from "../agent/chat-followups";
 
 export type ChatTurnResult = {
   threadId: string;
@@ -28,7 +27,6 @@ export class ChatService {
   constructor(
     private readonly agent: ToolAgentService,
     private readonly threads: ThreadService,
-    private readonly llm: LlmClient,
   ) {}
 
   async turn(
@@ -54,19 +52,17 @@ export class ChatService {
     this.log.debug(
       `Agent turn intent=${state.intent || "-"} confirm=${Boolean(state.confirm)} didMutate=${Boolean(state.didMutate)} uiAction=${state.uiAction?.key ?? "-"}`,
     );
-    const suggestions = await suggestFollowUps(
-      {
-        role: actor.role,
-        confirm: state.confirm,
-        uiAction: state.uiAction,
-        didMutate: state.didMutate,
-        blocks: state.blocks,
-        citations: state.citations,
-        userMessage: message,
-        reply: state.reply,
-      },
-      (msgs, opts) => this.llm.complete(msgs, opts),
-    );
+    const suggestions = resolveFollowUps(state.suggestions, {
+      role: actor.role,
+      confirm: state.confirm,
+      uiAction: state.uiAction,
+      didMutate: state.didMutate,
+      blocks: state.blocks,
+      citations: state.citations,
+      userMessage: message,
+      reply: state.reply,
+    });
+
     thread.messages.push({ role: "user", content: message });
     thread.messages.push({
       role: "assistant",
@@ -86,13 +82,13 @@ export class ChatService {
       threadId: thread.threadId,
       reply: state.reply,
       confirm: state.confirm ?? null,
-      executed: state.didMutate ? state.executed ?? null : null,
-      didMutate: Boolean(state.didMutate),
-      citations: state.citations ?? [],
       uiAction: state.uiAction ?? null,
       blocks: state.blocks ?? [],
       highlights: state.highlights ?? [],
       suggestions,
+      executed: state.didMutate ? state.executed ?? null : null,
+      didMutate: Boolean(state.didMutate),
+      citations: state.citations ?? [],
     };
   }
 }

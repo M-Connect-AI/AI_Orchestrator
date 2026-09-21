@@ -5,6 +5,15 @@
 {$SITE_ADDRESS:http://:80} {
 	encode gzip
 
+	handle /.well-known/apple-app-site-association {
+		root * /srv
+		header {
+			Content-Type application/json
+			defer
+		}
+		file_server
+	}
+
 	handle_path /api/agent/* {
 		reverse_proxy agent:3001 {
 			flush_interval -1
